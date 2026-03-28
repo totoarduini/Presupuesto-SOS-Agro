@@ -248,14 +248,9 @@ body{font-family:"IBM Plex Sans",sans-serif;background:var(--crema);color:var(--
     <label>Hasta</label><input type="date" id="det-hasta" value="2027-04-30">
     <div class="sep"></div>
     <div class="fg"><label>Cultivo</label>
-      <select id="det-cultivo" onchange="updateAnteOpts()">
-        <option value="Trigo">Trigo</option><option value="Cebada">Cebada</option>
-        <option value="Girasol">Girasol</option><option value="Maiz">Maíz</option>
-        <option value="Maiz 2da">Maíz 2da</option><option value="Maiz tardio">Maíz tardío</option>
-        <option value="Soja">Soja</option><option value="Soja 2da">Soja 2da</option>
-      </select>
+      <select id="det-cultivo" onchange="updateAnteOpts()"></select>
     </div>
-    <div class="fg"><label>Antecesor</label><select id="det-ante" onchange="renderDetalle()"></select></div>
+    <div class="fg"><label>Antecesor</label><select id="det-ante" onchange="updateSitOpts()"></select></div>
     <div class="fg"><label>Situación</label><select id="det-sit" onchange="renderDetalle()"></select></div>
     <div style="font-size:11px;color:var(--txt-m);margin-left:auto;" id="det-ha-lbl"></div>
   </div>
@@ -558,7 +553,7 @@ async function loadLotes(){
     // Columnas esperadas: empresa, campo, lote, cultivo, antecesor, ant, sup_ha, situacion
     lotesData = all.filter(r=> r.empresa?.toLowerCase() === currentEmpresa.toLowerCase());
     renderLotes();
-    renderDetalle();
+    populateCultivoSelect();
     renderResumen();
     renderMensual();
   } catch(e){
@@ -642,9 +637,11 @@ function etapa(f,c){
 // ============================================================
 const dosisOverrides = {}; // key: "prod|||un" -> dosis
 
-function dosisKey(prod, un){ return prod + "|||" + un; }
-function getDosis(prod, un, defaultDosis){
-  const k = dosisKey(prod, un);
+function dosisKey(prod, un, cultivo, ante, sit, fecha){
+  return [cultivo,ante,sit,fecha,prod,un].join("|||");
+}
+function getDosis(prod, un, defaultDosis, cultivo, ante, sit, fecha){
+  const k = dosisKey(prod, un, cultivo, ante, sit, fecha);
   return dosisOverrides[k] !== undefined ? dosisOverrides[k] : defaultDosis;
 }
 
@@ -666,28 +663,49 @@ function getCombos(cultivos){
 // ============================================================
 //  DETALLE con dosis editables
 // ============================================================
+function populateCultivoSelect(){
+  const cultivos=[...new Set(lotesData.map(r=>(r.cultivo||"").trim()).filter(Boolean))].sort();
+  const sel=document.getElementById("det-cultivo");
+  const cur=sel.value;
+  sel.innerHTML=cultivos.map(c=>`<option value="${c}">${c}</option>`).join("");
+  // restore previous selection if still valid
+  if(cultivos.includes(cur)) sel.value=cur;
+  updateAnteOpts();
+}
+
 function updateAnteOpts(){
   const c=document.getElementById("det-cultivo").value;
-  const antes=[...new Set(lotesData.filter(r=>r.cultivo===c).map(r=>(r.ant||r.antecesor_cod||"").trim()).filter(Boolean))];
-  const sits=[...new Set(lotesData.filter(r=>r.cultivo===c&&r.situacion).map(r=>(r.situacion||"").trim()))];
-  const allAntes=antes.length?antes:(c==="Girasol"?["sj","sj2","mz","mzt"]:["gi","mzs","sj"]);
-  const allSits=sits.length?sits:(c==="Girasol"?["Base","nabo"]:["Base","nabo","RG"]);
-  document.getElementById("det-ante").innerHTML=allAntes.map(a=>`<option value="${a}">${ANT_LBL[a]||a} (${a})</option>`).join("");
-  document.getElementById("det-sit").innerHTML=allSits.map(s=>`<option value="${s}">${s}</option>`).join("");
+  const antes=[...new Set(
+    lotesData.filter(r=>(r.cultivo||"").trim()===c)
+             .map(r=>(r.ant||r.antecesor_cod||"").trim())
+             .filter(Boolean)
+  )].sort();
+  const sel=document.getElementById("det-ante");
+  const cur=sel.value;
+  sel.innerHTML=antes.map(a=>`<option value="${a}">${ANT_LBL[a]||a} (${a})</option>`).join("");
+  if(antes.includes(cur)) sel.value=cur;
+  updateSitOpts();
+}
+
+function updateSitOpts(){
+  const c=document.getElementById("det-cultivo").value;
+  const ante=document.getElementById("det-ante").value;
+  const sits=[...new Set(
+    lotesData.filter(r=>(r.cultivo||"").trim()===c && (r.ant||r.antecesor_cod||"").trim()===ante && r.situacion)
+             .map(r=>(r.situacion||"").trim())
+  )].sort();
+  const sel=document.getElementById("det-sit");
+  const cur=sel.value;
+  sel.innerHTML=sits.map(s=>`<option value="${s}">${s}</option>`).join("");
+  if(sits.includes(cur)) sel.value=cur;
   renderDetalle();
 }
 
-function setDosisOverride(prod, un, val){
+function setDosisOverride(prod, un, cultivo, ante, sit, fecha, val){
   const v = parseFloat(val);
-  const k = dosisKey(prod, un);
-  if(!isNaN(v) && v >= 0){
-    dosisOverrides[k] = v;
-  } else {
-    delete dosisOverrides[k];
-  }
-  renderDetalle();
-  renderResumen();
-  renderMensual();
+  const k = dosisKey(prod, un, cultivo, ante, sit, fecha);
+  if(!isNaN(v) && v >= 0){ dosisOverrides[k] = v; } else { delete dosisOverrides[k]; }
+  renderDetalle(); renderResumen(); renderMensual();
 }
 
 function resetDosis(){
@@ -744,18 +762,24 @@ function renderDetalle(){
   rows.forEach(r=>{
     const e=etapa(r.f,c);
     if(e!==lastE){html+=`<tr class="etapa-sep"><td colspan="7">${e}</td></tr>`;lastE=e;}
-    const k=dosisKey(r.prod,r.un);
-    const d=getDosis(r.prod,r.un,r.dosis);
+    const k=dosisKey(r.prod,r.un,c,ante,sit,r.f);
+    const d=getDosis(r.prod,r.un,r.dosis,c,ante,sit,r.f);
     const isOverridden = dosisOverrides[k]!==undefined;
-    const dosisStyle = isOverridden ? "color:var(--azul);font-weight:600" : "color:var(--txt-m)";
-    const resetBtn = isOverridden ? `<button onclick="resetOneDosis('${r.prod.replace(/'/g,"\\'")}','${r.un}')" style="font-size:10px;border:none;background:none;color:#a33;cursor:pointer;padding:2px" title="Restaurar dosis original">↺</button>` : "";
+    // escape strings for inline onclick
+    const ep=r.prod.replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+    const eu=r.un.replace(/'/g,"\\'");
+    const ec=c.replace(/'/g,"\\'");
+    const ea=ante.replace(/'/g,"\\'");
+    const es=sit.replace(/'/g,"\\'");
+    const ef=r.f;
+    const resetBtn = isOverridden ? `<button onclick="resetOneDosis('${ep}','${eu}','${ec}','${ea}','${es}','${ef}')" style="font-size:10px;border:none;background:none;color:#a33;cursor:pointer;padding:2px" title="Restaurar dosis original">↺</button>` : "";
     html+=`<tr>
       <td class="fecha">${fd(r.f)}</td>
       <td style="font-weight:500">${r.prod}</td>
       <td class="num">
         <input type="number" step="any" min="0" value="${d}"
           style="width:70px;text-align:right;font-family:inherit;font-size:12px;border:1px solid var(--borde-m);border-radius:4px;padding:2px 5px;${isOverridden?'border-color:var(--azul);background:var(--azul-bg);':''}"
-          onchange="setDosisOverride('${r.prod.replace(/'/g,"\\'")}','${r.un}',this.value)"
+          onchange="setDosisOverride('${ep}','${eu}','${ec}','${ea}','${es}','${ef}',this.value)"
           title="Dosis original: ${r.dosis}">
       </td>
       <td>${r.un}</td>
@@ -774,8 +798,8 @@ function renderDetalle(){
   tb.innerHTML=html;
 }
 
-function resetOneDosis(prod, un){
-  delete dosisOverrides[dosisKey(prod, un)];
+function resetOneDosis(prod, un, cultivo, ante, sit, fecha){
+  delete dosisOverrides[dosisKey(prod, un, cultivo, ante, sit, fecha)];
   renderDetalle(); renderResumen(); renderMensual();
 }
 
@@ -851,7 +875,7 @@ function renderResumen(){
       if(busq&&!r.prod.toLowerCase().includes(busq))return;
       const k=r.prod+"|||"+r.un;
       if(!byP[k])byP[k]={prod:r.prod,un:r.un,tipo,totals:{}};
-      byP[k].totals[c]=(byP[k].totals[c]||0)+getDosis(r.prod,r.un,r.dosis)*h;
+      byP[k].totals[c]=(byP[k].totals[c]||0)+getDosis(r.prod,r.un,r.dosis,c,a,s,r.f)*h;
     });});
   });
   const keys=Object.keys(byP).sort((a,b)=>{
@@ -896,7 +920,7 @@ function renderMensual(){
       if(busq&&!r.prod.toLowerCase().includes(busq))return;
       const k=r.prod+"|||"+r.un;
       if(!byP[k])byP[k]={prod:r.prod,un:r.un,tipo,meses:{}};
-      byP[k].meses[mm]=(byP[k].meses[mm]||0)+getDosis(r.prod,r.un,r.dosis)*h;
+      byP[k].meses[mm]=(byP[k].meses[mm]||0)+getDosis(r.prod,r.un,r.dosis,c,a,s,r.f)*h;
       mesesSet.add(mm);
     });});
   });
