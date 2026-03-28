@@ -259,7 +259,10 @@ body{font-family:"IBM Plex Sans",sans-serif;background:var(--crema);color:var(--
     <div style="font-size:11px;color:var(--txt-m);margin-left:auto;" id="det-ha-lbl"></div>
   </div>
   <div class="card">
-    <div class="card-header"><h4 id="det-titulo">Detalle</h4></div>
+    <div class="card-header">
+      <h4 id="det-titulo">Detalle</h4>
+      <button class="btn-export btn-xls" onclick="exportDetalle()">↓ Excel base de datos</button>
+    </div>
     <table class="data-table">
       <thead><tr><th>Fecha</th><th>Producto / Labor</th><th class="num">Dosis/ha</th><th>Unidad</th><th class="num">Ha</th><th class="num">Total</th></tr></thead>
       <tbody id="det-body"></tbody>
@@ -725,21 +728,6 @@ function getDosis(prod, un, defaultDosis, cultivo, ante, sit, fecha){
   return dosisOverrides[k] !== undefined ? dosisOverrides[k] : defaultDosis;
 }
 
-// getCombos: agrupa lotes por cultivo, ant, sit
-function getCombos(cultivos){
-  const r={};
-  cultivos.forEach(c=>r[c]=[]);
-  lotesData.forEach(row=>{
-    const c=(row.cultivo||"").trim();
-    if(!cultivos.includes(c))return;
-    const sit=(row.situacion||"").trim();
-    const ant=(row.ant||row.antecesor_cod||"").trim();
-    if(!sit)return;
-    r[c].push({a:ant, s:sit, h:parseFloat(row.sup_ha)||0});
-  });
-  return r;
-}
-
 // ============================================================
 //  DETALLE con dosis editables
 // ============================================================
@@ -1032,8 +1020,53 @@ function renderMensual(){
 }
 
 // ============================================================
-//  EXPORT
+//  EXPORT DETALLE — base de datos plana (todas las combinaciones)
 // ============================================================
+function exportDetalle(){
+  if(typeof XLSX==="undefined"){alert("Librería Excel no disponible. Verificá la conexión.");return;}
+
+  const desde=document.getElementById("det-desde").value;
+  const hasta=document.getElementById("det-hasta").value;
+
+  const rows=[["Empresa","Lote","Campo","Cultivo","Antecesor","Situacion","Ha","Fecha","Etapa","Producto / Labor","Tipo","Dosis/ha","Unidad","Total"]];
+
+  // Iterar todas las combinaciones activas de lotes
+  const combsPorCult={};
+  lotesData.forEach(r=>{
+    const c=(r.cultivo||"").trim();
+    const ant=(r.ant||"").trim()||anteNombreACod(r.antecesor||"");
+    const sit=(r.situacion||"Base").trim();
+    const ha=parseFloat(r.sup_ha)||0;
+    if(!c||!ant||!sit||!ha)return;
+    if(!combsPorCult[c])combsPorCult[c]=[];
+    combsPorCult[c].push({lote:r.lote,campo:(r.campo||"").replace(/_/g," "),ant,anteNom:r.antecesor||ant,sit,ha,empresa:r.empresa||currentEmpresa});
+  });
+
+  Object.entries(combsPorCult).forEach(([cultivo,combs])=>{
+    DATA.filter(dr=>inRange(dr.f,desde,hasta)).forEach(dr=>{
+      combs.forEach(({lote,campo,ant,anteNom,sit,ha,empresa})=>{
+        if(!rowOk(dr,cultivo,ant,sit))return;
+        const d=getDosis(dr.prod,dr.un,dr.dosis,cultivo,ant,sit,dr.f);
+        rows.push([
+          empresa, lote, campo, cultivo, anteNom, sit,
+          ha, fd(dr.f), etapa(dr.f,cultivo),
+          dr.prod, TIPO[dr.prod]||"Otro",
+          d, dr.un, parseFloat((d*ha).toFixed(3))
+        ]);
+      });
+    });
+  });
+
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  // Anchos de columna
+  const widths=[10,12,14,10,14,8,6,10,22,24,12,10,8,10];
+  ws["!cols"]=widths.map(w=>({wch:w}));
+
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Detalle");
+  XLSX.writeFile(wb,`Presupuesto_${currentEmpresa}_Detalle_26-27.xlsx`);
+}
+
 function exportPDF(which){
   const tabId=which==="resumen"?"tab-resumen":"tab-mensual";
   const title=which==="resumen"?"Resumen Total":"Resumen Mensual";
