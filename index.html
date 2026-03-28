@@ -80,7 +80,11 @@ body{font-family:"IBM Plex Sans",sans-serif;background:var(--crema);color:var(--
 .data-table tbody tr:hover{background:var(--verde-bg);}
 .data-table td{padding:5px 10px;vertical-align:middle;}
 .data-table td.num{text-align:right;font-variant-numeric:tabular-nums;}
-.sit-chip{display:inline-block;font-size:10px;font-weight:500;padding:1px 7px;border-radius:10px;}
+.sit-select-lote{font-family:inherit;font-size:11px;font-weight:500;border:1px solid var(--borde-m);border-radius:10px;padding:2px 8px;cursor:pointer;transition:all .15s;}
+.sit-select-lote.sit-Base{background:#e8f0e8;color:#2e5a2e;border-color:#b8d4b8;}
+.sit-select-lote.sit-nabo{background:var(--ambar-bg);color:var(--ambar);border-color:#e0c880;}
+.sit-select-lote.sit-RG{background:var(--morado-bg);color:var(--morado);border-color:#c8b8e8;}
+.sit-select-lote:focus{outline:none;}
 .sit-Base{background:#e8f0e8;color:#2e5a2e;}
 .sit-nabo{background:var(--ambar-bg);color:var(--ambar);}
 .sit-RG{background:var(--morado-bg);color:var(--morado);}
@@ -542,6 +546,19 @@ function showApp(){
 }
 
 // ============================================================
+//  SITUACIONES — localStorage por empresa+lote+cultivo
+// ============================================================
+function sitKey(empresa, lote, cultivo){
+  return `sos_sit_${empresa}_${lote}_${cultivo}`.toLowerCase();
+}
+function getSit(lote, cultivo){
+  return localStorage.getItem(sitKey(currentEmpresa, lote, cultivo)) || "Base";
+}
+function saveSit(lote, cultivo, sit){
+  localStorage.setItem(sitKey(currentEmpresa, lote, cultivo), sit);
+}
+
+// ============================================================
 //  CARGAR LOTES
 // ============================================================
 async function loadLotes(){
@@ -550,8 +567,11 @@ async function loadLotes(){
   try {
     const csv  = await fetchCSV(URL_LOTES);
     const all  = parseCSV(csv);
-    // Columnas esperadas: empresa, campo, lote, cultivo, antecesor, ant, sup_ha, situacion
     lotesData = all.filter(r=> r.empresa?.toLowerCase() === currentEmpresa.toLowerCase());
+    // Aplicar situación desde localStorage (default "Base")
+    lotesData.forEach(r=>{
+      r.situacion = getSit(r.lote, r.cultivo);
+    });
     renderLotes();
     populateCultivoSelect();
     renderResumen();
@@ -560,6 +580,28 @@ async function loadLotes(){
     document.getElementById("lotes-loading").innerHTML=
       `<div style="color:#a33">Error al cargar lotes. Verificá la conexión.<br><small>${e}</small></div>`;
   }
+}
+
+function setSituacion(lote, cultivo, sit, idx){
+  saveSit(lote, cultivo, sit);
+  lotesData[idx].situacion = sit;
+  // update select style
+  const sel = document.getElementById(`sit-sel-${idx}`);
+  if(sel){ sel.className=`sit-select-lote sit-${sit}`; }
+  renderResumen();
+  renderMensual();
+  populateCultivoSelect();
+}
+
+function setSitAll(sit){
+  lotesData.forEach((r,i)=>{
+    saveSit(r.lote, r.cultivo, sit);
+    r.situacion = sit;
+    const sel = document.getElementById(`sit-sel-${i}`);
+    if(sel){ sel.value=sit; sel.className=`sit-select-lote sit-${sit}`; }
+  });
+  renderResumen();
+  renderMensual();
 }
 
 function renderLotes(){
@@ -572,20 +614,35 @@ function renderLotes(){
   document.getElementById("stats-bar").innerHTML=
     `<div class="stat-card"><span class="lbl">Lotes</span><span class="val">${[...new Set(lotesData.map(r=>r.lote))].length}</span></div>`+
     `<div class="stat-card"><span class="lbl">Ha totales</span><span class="val">${n(totalHa)}</span></div>`+
-    `<div class="stat-card"><span class="lbl">Cultivos</span><span class="val">${cultivos.length}</span></div>`;
+    `<div class="stat-card"><span class="lbl">Cultivos</span><span class="val">${cultivos.length}</span></div>`+
+    `<div style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt-l)">
+      Asignar todos:
+      <button onclick="setSitAll('Base')" style="font-family:inherit;font-size:11px;font-weight:500;background:#e8f0e8;color:#2e5a2e;border:1px solid #b8d4b8;border-radius:10px;padding:2px 10px;cursor:pointer">Base</button>
+      <button onclick="setSitAll('nabo')" style="font-family:inherit;font-size:11px;font-weight:500;background:var(--ambar-bg);color:var(--ambar);border:1px solid #e0c880;border-radius:10px;padding:2px 10px;cursor:pointer">Nabo</button>
+      <button onclick="setSitAll('RG')" style="font-family:inherit;font-size:11px;font-weight:500;background:var(--morado-bg);color:var(--morado);border:1px solid #c8b8e8;border-radius:10px;padding:2px 10px;cursor:pointer">RG</button>
+    </div>`;
 
   // Table
   let html="";
-  lotesData.forEach(r=>{
+  lotesData.forEach((r,i)=>{
     const cCls = "chip-"+(r.cultivo||"").replace(/ /g,"-");
-    const sCls = "sit-"+(r.situacion||"");
+    const sit = r.situacion || "Base";
+    const sitOpts = r.cultivo==="Girasol"
+      ? ["Base","nabo"]
+      : ["Base","nabo","RG"];
+    const opts = sitOpts.map(s=>`<option value="${s}"${s===sit?" selected":""}>${s}</option>`).join("");
     html+=`<tr>
       <td style="font-weight:500">${r.lote}</td>
       <td style="color:var(--txt-m)">${(r.campo||"").replace(/_/g," ")}</td>
       <td><span class="cult-chip ${cCls}">${r.cultivo}</span></td>
       <td style="color:var(--txt-m);font-size:12px">${r.antecesor||""}</td>
       <td class="num">${n(parseFloat(r.sup_ha)||0)}</td>
-      <td><span class="sit-chip ${sCls}">${r.situacion||"—"}</span></td>
+      <td>
+        <select id="sit-sel-${i}" class="sit-select-lote sit-${sit}"
+          onchange="setSituacion('${(r.lote||"").replace(/'/g,"\\'")}','${(r.cultivo||"").replace(/'/g,"\\'")}',this.value,${i})">
+          ${opts}
+        </select>
+      </td>
     </tr>`;
   });
   document.getElementById("lotes-body").innerHTML = html || `<tr><td colspan="6" class="empty-msg">Sin lotes para esta empresa.</td></tr>`;
@@ -631,10 +688,33 @@ function etapa(f,c){
   return"▸ Cosecha";
 }
 
-// getCombos desde lotes del GSheet (filtrado por empresa)
-// ============================================================
-//  DOSIS OVERRIDES (editables por usuario)
-// ============================================================
+// Mapeo nombre completo → código corto de antecesor
+const ANT_MAP = {
+  "girasol":"gi","maiz silo":"mzs","maiz silo tardio":"mzst",
+  "maiz":"mz","maiz tardio":"mzt","maiz 2da":"mz2",
+  "soja":"sj","soja 2da":"sj2","cebada":"ce","trigo":"tr",
+};
+function anteNombreACod(nombre){
+  return ANT_MAP[(nombre||"").toLowerCase().trim()] || (nombre||"").trim();
+}
+
+// getCombos: agrupa lotes por cultivo, ant (código), sit
+function getCombos(cultivos){
+  const r={};
+  cultivos.forEach(c=>r[c]=[]);
+  lotesData.forEach(row=>{
+    const c=(row.cultivo||"").trim();
+    if(!cultivos.includes(c))return;
+    const sit=(row.situacion||"").trim();
+    // usar ant si existe, sino convertir antecesor a código
+    const cod=(row.ant||"").trim();
+    const ant=cod||anteNombreACod(row.antecesor||"");
+    if(!sit||!ant)return;
+    r[c].push({a:ant, s:sit, h:parseFloat(row.sup_ha)||0});
+  });
+  return r;
+}
+
 const dosisOverrides = {}; // key: "prod|||un" -> dosis
 
 function dosisKey(prod, un, cultivo, ante, sit, fecha){
@@ -675,24 +755,30 @@ function populateCultivoSelect(){
 
 function updateAnteOpts(){
   const c=document.getElementById("det-cultivo").value;
-  const antes=[...new Set(
-    lotesData.filter(r=>(r.cultivo||"").trim()===c)
-             .map(r=>(r.ant||r.antecesor_cod||"").trim())
-             .filter(Boolean)
-  )].sort();
+  // Obtener antecesores únicos como código, mostrando nombre completo si está disponible
+  const antesMap={};
+  lotesData.filter(r=>(r.cultivo||"").trim()===c).forEach(r=>{
+    const cod=(r.ant||"").trim()||anteNombreACod(r.antecesor||"");
+    const nom=(r.antecesor||cod).trim();
+    if(cod) antesMap[cod]=nom;
+  });
   const sel=document.getElementById("det-ante");
   const cur=sel.value;
-  sel.innerHTML=antes.map(a=>`<option value="${a}">${ANT_LBL[a]||a} (${a})</option>`).join("");
-  if(antes.includes(cur)) sel.value=cur;
+  sel.innerHTML=Object.entries(antesMap).sort((a,b)=>a[1].localeCompare(b[1]))
+    .map(([cod,nom])=>`<option value="${cod}">${nom}</option>`).join("");
+  if(Object.keys(antesMap).includes(cur)) sel.value=cur;
   updateSitOpts();
 }
 
 function updateSitOpts(){
   const c=document.getElementById("det-cultivo").value;
-  const ante=document.getElementById("det-ante").value;
+  const ante=document.getElementById("det-ante").value; // ya es código
   const sits=[...new Set(
-    lotesData.filter(r=>(r.cultivo||"").trim()===c && (r.ant||r.antecesor_cod||"").trim()===ante && r.situacion)
-             .map(r=>(r.situacion||"").trim())
+    lotesData.filter(r=>{
+      const rCult=(r.cultivo||"").trim();
+      const cod=(r.ant||"").trim()||anteNombreACod(r.antecesor||"");
+      return rCult===c && cod===ante && r.situacion;
+    }).map(r=>(r.situacion||"").trim())
   )].sort();
   const sel=document.getElementById("det-sit");
   const cur=sel.value;
@@ -700,6 +786,7 @@ function updateSitOpts(){
   if(sits.includes(cur)) sel.value=cur;
   renderDetalle();
 }
+
 
 function setDosisOverride(prod, un, cultivo, ante, sit, fecha, val){
   const v = parseFloat(val);
@@ -726,7 +813,7 @@ function renderDetalle(){
   // Ha: suma lotes que coinciden cultivo+sit (ant puede ser vacío si no se generó código)
   // Primero intentamos match exacto por ant, si da 0 usamos solo cultivo+sit
   const haExacto=lotesData.filter(r=>{
-    const rAnt=(r.ant||r.antecesor_cod||"").trim();
+    const rAnt=(r.ant||"").trim()||anteNombreACod(r.antecesor||"");
     const rSit=(r.situacion||"").trim();
     const rCult=(r.cultivo||"").trim();
     return rCult===c && rAnt===ante && rSit===sit;
