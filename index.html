@@ -176,6 +176,34 @@ tr:hover td { background: var(--verde-bg); }
 .precio-input.modified { background: #fff8e8; border-color: #e6a817; }
 
 .sync-status { font-size: 11px; }
+
+/* Sticky table headers */
+.sticky-table-wrap { overflow-x: auto; }
+.sticky-table-wrap table thead tr th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--verde);
+  box-shadow: 0 2px 2px rgba(0,0,0,.15);
+}
+/* For planteo sections inside scroll container */
+.planteo-scroll { max-height: calc(100vh - 180px); overflow-y: auto; }
+.planteo-scroll .tbl-prod thead tr th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--verde);
+  box-shadow: 0 2px 2px rgba(0,0,0,.12);
+}
+/* Comparativo pivot sticky */
+.pivot-table { overflow-x: auto; max-height: calc(100vh - 200px); }
+.pivot-table table thead tr th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--verde);
+  box-shadow: 0 2px 2px rgba(0,0,0,.12);
+}
 </style>
 </head>
 <body>
@@ -186,7 +214,11 @@ tr:hover td { background: var(--verde-bg); }
   </div>
   <span id="resumen-header"></span>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+    <span id="save-indicator" style="font-size:11px;opacity:0;transition:opacity .5s;color:#a5d6a7"></span>
     <span id="sync-status" style="font-size:11px;opacity:.8"></span>
+    <button onclick="clearState()"
+      style="padding:4px 11px;border-radius:4px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:rgba(255,255,255,.12);color:rgba(255,255,255,.7)"
+      title="Borrar trabajo guardado y comenzar de cero">🗑 Limpiar</button>
     <button onclick="loadFromGSheets()" id="sync-btn"
       style="padding:4px 11px;border-radius:4px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:rgba(255,255,255,.18);color:white"
       title="Actualizar datos desde Google Sheets">🔄 Actualizar</button>
@@ -271,8 +303,15 @@ tr:hover td { background: var(--verde-bg); }
         <div class="ms-dropdown" id="ms-plt-tipo"></div>
       </div>
     </div>
+    <div class="form-group">
+      <label>Categoría</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-plt-cat')" type="button" id="ms-plt-cat-btn">Todas</button>
+        <div class="ms-dropdown" id="ms-plt-cat"></div>
+      </div>
+    </div>
   </div>
-  <div id="planteo-content"></div>
+  <div class="planteo-scroll" id="planteo-content"></div>
 </div>
 
 <!-- TAB 3: COMPARATIVO -->
@@ -299,6 +338,13 @@ tr:hover td { background: var(--verde-bg); }
       <div class="ms-wrap">
         <button class="ms-btn" onclick="toggleMs('ms-sit')" type="button" id="ms-sit-btn">Todas</button>
         <div class="ms-dropdown" id="ms-sit"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Categoría</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-cmp-cat')" type="button" id="ms-cmp-cat-btn">Todas</button>
+        <div class="ms-dropdown" id="ms-cmp-cat"></div>
       </div>
     </div>
     <div class="form-group">
@@ -540,6 +586,7 @@ async function loadFromGSheets() {
     btn.disabled = false; btn.textContent = '🔄 Actualizar';
     status.textContent = `✅ ${result.length} registros · ${new Date().toLocaleTimeString('es-AR')}`;
     status.style.color = '#a5d6a7';
+    saveState();
   } catch(e) {
     btn.disabled = false; btn.textContent = '🔄 Actualizar';
     status.textContent = '❌ ' + e.message;
@@ -708,16 +755,19 @@ function addSuperficie() {
   if (superficies.find(x => x.cultivo===c && x.antecesor===a && x.situacion===s)) return alert('Esa combinación ya está cargada.');
   superficies.push({id: supIdCounter++, cultivo:c, antecesor:a, situacion:s, ha});
   renderSuperficies();
+  saveState();
 }
 function removeSuperficie(id) {
   superficies = superficies.filter(s => s.id !== id);
   renderSuperficies();
+  saveState();
 }
 function updateHa(id, val) {
   const s = superficies.find(x => x.id === id);
   if (s) s.ha = parseFloat(val) || 0;
   updateHeaderResumen();
   updateCards();
+  saveState();
 }
 function renderSuperficies() {
   const wrap = document.getElementById('tabla-superficies-wrap');
@@ -781,6 +831,12 @@ function updatePltFiltros() {
   msTipo.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-plt-tipo-all" onchange="toggleMsAll('ms-plt-tipo','ms-plt-tipo-btn','ms-plt-tipo-all','Todos')"> <em>Todos</em></label>`
     + tipos.map(t => `<label class="ms-item"><input type="checkbox" value="${t}" onchange="refreshMsBtn('ms-plt-tipo','ms-plt-tipo-btn')">${t}</label>`).join('');
   document.getElementById('ms-plt-tipo-btn').textContent = `Todos (${tipos.length})`;
+  // Populate categoría ms
+  const cats = [...new Set(RECORDS.filter(r=>r['E/I'].toLowerCase()==='egreso'&&r.Tipo.toLowerCase()!=='grano').map(r=>r.Categoria))].filter(Boolean).sort();
+  const msCat = document.getElementById('ms-plt-cat');
+  msCat.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-plt-cat-all" onchange="toggleMsAll('ms-plt-cat','ms-plt-cat-btn','ms-plt-cat-all','Todas')"> <em>Todas</em></label>`
+    + cats.map(c => `<label class="ms-item"><input type="checkbox" value="${c}" onchange="refreshMsBtn('ms-plt-cat','ms-plt-cat-btn')">${c}</label>`).join('');
+  document.getElementById('ms-plt-cat-btn').textContent = `Todas (${cats.length})`;
   renderPlanteo();
 }
 // Fertilizante fosforado: cultivos que usan la lista Fina
@@ -806,9 +862,133 @@ function getDosis(supId, r) {
 function onDosisChange(supId, nro, fecha, prod, ha, val) {
   const k = `${supId}|${nro}|${fecha}|${prod}`;
   dosisOverrides[k] = parseFloat(val) || 0;
-  // Update total cell inline
+  const dosis = dosisOverrides[k];
+
+  // Update total cell inline (columna "Total ha")
   const totalEl = document.getElementById('total-'+CSS.escape(k));
-  if (totalEl) totalEl.textContent = fmtNumAuto(dosisOverrides[k] * ha);
+  if (totalEl) totalEl.innerHTML = `<strong>${fmtNumAuto(dosis * ha)}</strong>`;
+
+  // Update u$s/ha and u$s total cells inline
+  const sup = superficies.find(s => s.id === supId);
+  if (sup) {
+    const rec = filterRecords(sup.cultivo, sup.antecesor, sup.situacion)
+      .find(r => r['Nro Registro'] === String(nro) && r.Fecha === fecha && r['Produc/labor'] === prod);
+    if (rec) {
+      const pn = prodNameOverrides[k] || prod;
+      const precio = getPrecio(pn, rec.Unidad);
+      const costoHa = precio !== null ? precio * dosis : null;
+      const costoTot = precio !== null ? precio * dosis * ha : null;
+      const costoHaEl = document.getElementById('costoha-'+CSS.escape(k));
+      const costoTotEl = document.getElementById('costotot-'+CSS.escape(k));
+      if (costoHaEl) costoHaEl.innerHTML = fmtCosto(costoHa);
+      if (costoTotEl) costoTotEl.innerHTML = fmtCosto(costoTot);
+    }
+  }
+
+  // Recalculate the total-cost bar for this superficie
+  _recalcTotalBar(supId);
+
+  // Propagate to all other tabs that aggregate data (re-render silently if they're not visible)
+  if (document.getElementById('tab-insumos').classList.contains('active')) renderInsumos();
+  if (document.getElementById('tab-mensual').classList.contains('active')) renderMensual();
+  if (document.getElementById('tab-porha').classList.contains('active')) renderPorha();
+
+  saveState();
+}
+
+function _recalcTotalBar(supId) {
+  // Find the total-costo-bar div for this superficie and update it
+  // We identify it by looking for all total-costo-bar elements and matching by data attribute
+  const sup = superficies.find(s => s.id === supId);
+  if (!sup) return;
+  const allRecsForCost = filterRecords(sup.cultivo, sup.antecesor, sup.situacion);
+  let totalCostoSup = 0, nSinPrecio = 0;
+  for (const r of allRecsForCost) {
+    const rk = rowKey(sup.id, r);
+    const d = getDosis(sup.id, r);
+    const pn = prodNameOverrides[rk] || r['Produc/labor'];
+    const p = getPrecio(pn, r.Unidad);
+    if (p !== null) totalCostoSup += p * d * sup.ha;
+    else nSinPrecio++;
+  }
+  const barEl = document.querySelector(`.total-costo-bar[data-supid="${supId}"]`);
+  if (barEl) {
+    barEl.innerHTML = `<span>💵 Costo total estimado: <strong>u$s ${totalCostoSup.toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0})}</strong></span>
+      ${nSinPrecio>0?`<span style="color:#999">${nSinPrecio} ítem(s) sin precio</span>`:''}`;
+  }
+}
+
+// ============================================================
+//  PERSISTENCIA EN localStorage
+// ============================================================
+const LS_KEY = 'sosagro_2627_state';
+
+function saveState() {
+  try {
+    const state = {
+      superficies: superficies,
+      supIdCounter: supIdCounter,
+      dosisOverrides: dosisOverrides,
+      prodNameOverrides: prodNameOverrides,
+      preciosOverrides: preciosOverrides,
+      savedAt: new Date().toISOString()
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+    _showSaveIndicator();
+  } catch(e) {
+    console.warn('No se pudo guardar en localStorage:', e);
+  }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return false;
+    const state = JSON.parse(raw);
+    if (state.superficies && Array.isArray(state.superficies)) {
+      superficies.length = 0;
+      state.superficies.forEach(s => superficies.push(s));
+      supIdCounter = state.supIdCounter || (superficies.length ? Math.max(...superficies.map(s=>s.id)) + 1 : 1);
+    }
+    if (state.dosisOverrides) Object.assign(dosisOverrides, state.dosisOverrides);
+    if (state.prodNameOverrides) Object.assign(prodNameOverrides, state.prodNameOverrides);
+    if (state.preciosOverrides) Object.assign(preciosOverrides, state.preciosOverrides);
+    const syncEl = document.getElementById('sync-status');
+    if (syncEl && state.savedAt) {
+      const d = new Date(state.savedAt);
+      syncEl.textContent = `💾 Sesión cargada · guardada ${d.toLocaleDateString('es-AR')} ${d.toLocaleTimeString('es-AR')}`;
+      syncEl.style.color = '#a5d6a7';
+    }
+    return true;
+  } catch(e) {
+    console.warn('No se pudo cargar estado:', e);
+    return false;
+  }
+}
+
+function clearState() {
+  if (!confirm('¿Borrar todo el trabajo guardado y empezar de cero?')) return;
+  localStorage.removeItem(LS_KEY);
+  superficies.length = 0;
+  Object.keys(dosisOverrides).forEach(k => delete dosisOverrides[k]);
+  Object.keys(prodNameOverrides).forEach(k => delete prodNameOverrides[k]);
+  Object.keys(preciosOverrides).forEach(k => delete preciosOverrides[k]);
+  supIdCounter = 1;
+  renderSuperficies();
+  renderPlanteo();
+  renderInsumos();
+  const syncEl = document.getElementById('sync-status');
+  if (syncEl) { syncEl.textContent = '🗑 Estado borrado'; syncEl.style.color='#ef9a9a'; }
+}
+
+let _saveTimer = null;
+function _showSaveIndicator() {
+  const el = document.getElementById('save-indicator');
+  if (!el) return;
+  el.textContent = '💾 Guardado';
+  el.style.opacity = '1';
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => { el.style.opacity = '0'; }, 2000);
 }
 function onFertChange(selectEl) {
   const cultivo = selectEl.dataset.cultivo;
@@ -829,6 +1009,7 @@ function onFertChange(selectEl) {
   const costototEl = document.getElementById('costotot-'+CSS.escape(rk));
   if (costohaEl) costohaEl.innerHTML = fmtCosto(precio !== null ? precio * opt.dosis : null);
   if (costototEl) costototEl.innerHTML = fmtCosto(precio !== null ? precio * opt.dosis * ha : null);
+  saveState();
 }
 function renderPlanteo() {
   const wrap = document.getElementById('planteo-content');
@@ -840,6 +1021,7 @@ function renderPlanteo() {
   const fAnt = document.getElementById('plt-antecesor')?.value || '';
   const fSit = document.getElementById('plt-situacion')?.value || '';
   const fTipos = getMsSelected('ms-plt-tipo'); // vacío = todos
+  const fCats = getMsSelected('ms-plt-cat'); // vacío = todas
 
   let sups = superficies;
   if (fCultivo) sups = sups.filter(s => s.cultivo === fCultivo);
@@ -854,12 +1036,19 @@ function renderPlanteo() {
   for (const s of sups) {
     let recs = filterRecords(s.cultivo, s.antecesor, s.situacion);
     if (fTipos.length > 0) recs = recs.filter(r => fTipos.includes(r.Tipo));
+    if (fCats.length > 0) recs = recs.filter(r => fCats.includes(r.Categoria));
     // Attach cultivo to each rec for fertilizante detection
     recs.forEach(r => r._cultivo = s.cultivo);
     html += `<div style="margin-bottom:24px">
       <div class="planteo-cultivo-header">${cultivoBadge(s.cultivo)}
         <small>Ant: ${s.antecesor} &nbsp;|&nbsp; Sit: ${s.situacion} &nbsp;|&nbsp; ${fmtNum(s.ha,1)} ha · ${recs.length} ítems</small>
-      </div>`;
+      </div>
+      <div class="sticky-table-wrap"><table class="tbl-prod"><thead><tr>
+        <th style="text-align:left">Producto / Labor</th><th>Tipo</th><th>Categoría</th>
+        <th>Dosis/ha</th><th>Unidad</th>
+        <th>Total (${fmtNum(s.ha,1)} ha)</th>
+        <th>u$s/ha</th><th>u$s total</th>
+      </tr></thead><tbody>`;
     const groups = {};
     const groupOrder = [];
     for (const r of recs) {
@@ -867,20 +1056,16 @@ function renderPlanteo() {
       if (!groups[k]) { groups[k] = []; groupOrder.push(k); }
       groups[k].push(r);
     }
+    let lastGroupKey = null;
     for (const gk of groupOrder) {
       const [fecha, cat] = gk.split('||');
       const items = groups[gk];
-      html += `<div class="cat-group">
-        <div class="cat-header">
-          <span>📅 <strong>${fecha}</strong> &nbsp;—&nbsp; ${cat}</span>
-          <span style="font-size:11px;color:#aaa">${items.length} ítem${items.length>1?'s':''}</span>
-        </div>
-        <table class="tbl-prod"><thead><tr>
-          <th>Producto / Labor</th><th>Tipo</th>
-          <th>Dosis/ha</th><th>Unidad</th>
-          <th>Total (${fmtNum(s.ha,1)} ha)</th>
-          <th>u$s/ha</th><th>u$s total</th>
-        </tr></thead><tbody>`;
+      // Sub-header row for date+category
+      html += `<tr style="background:var(--verde-bg)">
+        <td colspan="8" style="text-align:left;padding:5px 10px;font-weight:700;font-size:11px;color:var(--acento);border-top:2px solid var(--verde-borde)">
+          📅 <strong>${fecha}</strong> &nbsp;—&nbsp; ${cat}
+          <span style="font-weight:400;font-size:10px;color:#aaa;margin-left:6px">${items.length} ítem${items.length>1?'s':''}</span>
+        </td></tr>`;
       for (const r of items) {
         const k = rowKey(s.id, r);
         const dosis = getDosis(s.id, r);
@@ -897,8 +1082,9 @@ function renderPlanteo() {
         const costoHa = precio !== null ? precio * dosis : null;
         const costoTotal = precio !== null ? precio * dosis * s.ha : null;
         html += `<tr>
-          <td>${prodCell}</td>
+          <td style="text-align:left">${prodCell}</td>
           <td>${tipoBadge(r.Tipo)}</td>
+          <td><span style="font-size:11px;color:#666">${r.Categoria}</span></td>
           <td><input id="dosis-${k}" class="dosis-input" type="number" step="any" value="${dosis}"
             onchange="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"
             oninput="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"></td>
@@ -908,8 +1094,8 @@ function renderPlanteo() {
           <td id="costotot-${k}">${fmtCosto(costoTotal)}</td>
         </tr>`;
       }
-      html += `</tbody></table></div>`;
     }
+    html += `</tbody></table></div>`;
     // Total costo de esta superficie
     const allRecsForCost = recs;
     let totalCostoSup = 0, nSinPrecio = 0;
@@ -921,7 +1107,7 @@ function renderPlanteo() {
       if (p !== null) totalCostoSup += p * d * s.ha;
       else nSinPrecio++;
     }
-    html += `<div class="total-costo-bar">
+    html += `<div class="total-costo-bar" data-supid="${s.id}">
       <span>💵 Costo total estimado: <strong>u$s ${totalCostoSup.toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0})}</strong></span>
       ${nSinPrecio>0?`<span style="color:#999">${nSinPrecio} ítem(s) sin precio</span>`:''}
     </div>`;
@@ -1002,12 +1188,19 @@ function updateCmpFiltros() {
     document.getElementById('ms-sit').innerHTML = '';
     document.getElementById('ms-sit-btn').textContent = 'Todas';
   }
+  // Poblar categorías disponibles
+  const cats = [...new Set(RECORDS.filter(r=>r['E/I'].toLowerCase()==='egreso'&&r.Tipo.toLowerCase()!=='grano').map(r=>r.Categoria))].filter(Boolean).sort();
+  const msCat = document.getElementById('ms-cmp-cat');
+  msCat.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-cmp-cat-all" onchange="toggleMsAll('ms-cmp-cat','ms-cmp-cat-btn','ms-cmp-cat-all','Todas')"> <em>Todas</em></label>`
+    + cats.map(c => `<label class="ms-item"><input type="checkbox" value="${c}" onchange="refreshMsBtn('ms-cmp-cat','ms-cmp-cat-btn')">${c}</label>`).join('');
+  document.getElementById('ms-cmp-cat-btn').textContent = `Todas (${cats.length})`;
   renderComparativo();
 }
 function renderComparativo() {
   const cultivo = document.getElementById('cmp-cultivo').value;
   const selAnts = getMsSelected('ms-ant');
   const selSits = getMsSelected('ms-sit');
+  const selCats = getMsSelected('ms-cmp-cat');
   const tipo = document.getElementById('cmp-tipo').value;
   const wrap = document.getElementById('comparativo-content');
 
@@ -1022,6 +1215,7 @@ function renderComparativo() {
   // Base records filtered by cultivo + tipo
   let baseRecs = RECORDS.filter(r => activs.includes(r.Activ) && r['E/I']==='Egreso' && r.Tipo!=='Grano');
   if (tipo) baseRecs = baseRecs.filter(r => r.Tipo === tipo);
+  if (selCats.length > 0) baseRecs = baseRecs.filter(r => selCats.includes(r.Categoria));
 
   // Determine columns and filter axis based on pivot
   let cols, colRecs;
@@ -1386,6 +1580,7 @@ function onPrecioChange(key, val) {
   renderPlanteo();
   renderInsumos();
   document.getElementById('prec-summary') && updatePrecSummary();
+  saveState();
 }
 function updatePrecSummary() {
   const allKeys = Object.keys(PRECIOS_BASE);
@@ -1749,10 +1944,17 @@ function renderTimeline() {
 }
 
 // init
+const _stateLoaded = loadState();
 renderSuperficies();
 initPorhaAnts();
 updatePltFiltros();
 populateInsTipos();
+if (_stateLoaded && superficies.length) {
+  // Restore rendered state after loading from cache
+  renderPlanteo();
+  renderInsumos();
+  renderMensual();
+}
 // close multiselect on click outside
 document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) document.querySelectorAll('.ms-dropdown').forEach(d=>d.classList.remove('open')); });
 </script>
