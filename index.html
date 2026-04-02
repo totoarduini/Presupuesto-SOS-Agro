@@ -450,7 +450,15 @@ function csvToRecords(csvText) {
     if (!Object.values(normActCsv).includes(row['Activ'])) continue;
     if (!row['Tipo']) continue;
     // Parse date
-    const d = new Date(row['Fecha']);
+    // Handle DD/MM/YYYY (Argentine) and YYYY-MM-DD formats
+    let rawFecha = String(row['Fecha']).trim();
+    let d;
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(rawFecha)) {
+      const [dd,mm,yyyy] = rawFecha.split('/');
+      d = new Date(`${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`);
+    } else {
+      d = new Date(rawFecha);
+    }
     if (isNaN(d)) continue;
     row['Fecha'] = d.toISOString().substring(0,10);
     row['Dosis'] = parseFloat(String(row['Dosis']).replace(',','.')) || 0;
@@ -1072,29 +1080,30 @@ function renderComparativo() {
     sectionMap[sk].items.push(r);
   }
 
-  let html = `<p style="margin-bottom:10px;color:#666;font-size:12px">${rows.length} ítems · ${cols.length} situaciones comparadas</p>`;
+  const nCols = 3 + cols.length;
+  let html = `<p style="margin-bottom:10px;color:#666;font-size:12px">${rows.length} ítems · ${cols.length} situaciones comparadas</p>
+  <div class="pivot-table"><table class="tbl-prod">
+    <thead><tr>
+      <th>Producto / Labor</th><th>Tipo</th><th>Unidad</th>
+      ${cols.map(s=>`<th>${s}</th>`).join('')}
+    </tr></thead><tbody>`;
   for (const sk of sectionOrder) {
     const sec = sectionMap[sk];
-    html += `<div class="cat-group">
-      <div class="cat-header">
-        <span>📅 <strong>${sec.fecha}</strong> &nbsp;—&nbsp; ${sec.cat}</span>
-        <span style="font-size:11px;color:#aaa">${sec.items.length} ítem${sec.items.length>1?'s':''}</span>
-      </div>
-      <div class="pivot-table"><table class="tbl-prod">
-        <thead><tr>
-          <th>Producto / Labor</th><th>Tipo</th><th>Unidad</th>
-          ${cols.map(s=>`<th class="num col-sit">${s}</th>`).join('')}
-        </tr></thead><tbody>`;
+    html += `<tr style="background:var(--verde-bg)">
+      <td colspan="${nCols}" style="text-align:left;padding:6px 10px;font-weight:700;font-size:12px;color:var(--acento);border-top:2px solid var(--verde-borde)">
+        📅 <strong>${sec.fecha}</strong> &nbsp;—&nbsp; ${sec.cat}
+        <span style="font-weight:400;font-size:11px;color:#888;margin-left:8px">${sec.items.length} ítem${sec.items.length>1?'s':''}</span>
+      </td></tr>`;
     for (const r of sec.items) {
       html += `<tr>
         <td><strong>${r.prod}</strong></td>
         <td>${tipoBadge(r.tipo)}</td>
         <td>${r.unidad}</td>
-        ${cols.map(s => r.bySit[s] != null ? `<td class="num"><strong>${fmtNumAuto(r.bySit[s])}</strong></td>` : `<td class="num" style="color:#bbb">—</td>`).join('')}
+        ${cols.map(s => r.bySit[s] != null ? `<td><strong>${fmtNumAuto(r.bySit[s])}</strong></td>` : `<td style="color:#bbb">—</td>`).join('')}
       </tr>`;
     }
-    html += `</tbody></table></div></div>`;
   }
+  html += `</tbody></table></div>`;
   wrap.innerHTML = html;
 }
 
