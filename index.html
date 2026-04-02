@@ -1021,15 +1021,18 @@ function onDosisChangeEl(el) {
   const fecha = el.dataset.fecha;
   const prod = el.dataset.prod;
   const ha = parseFloat(el.dataset.ha);
-  onDosisChange(supId, nro, fecha, prod, ha, el.value);
+  const k = el.dataset.k;       // the dosisOverrides key
+  const domId = el.dataset.domId; // the safe DOM id prefix
+  onDosisChange(supId, nro, fecha, prod, ha, el.value, k, domId);
 }
-function onDosisChange(supId, nro, fecha, prod, ha, val) {
-  const k = `${supId}|${nro}|${fecha}|${prod}`;
+function onDosisChange(supId, nro, fecha, prod, ha, val, kOverride, domId) {
+  const k = kOverride !== undefined ? kOverride : `${supId}|${nro}|${fecha}|${prod}`;
   dosisOverrides[k] = parseFloat(val) || 0;
   const newDosis = dosisOverrides[k];
 
-  // Update total cell inline
-  const totalEl = document.getElementById('total-'+CSS.escape(k));
+  // Update total cell inline using safe domId
+  const pfx = domId || k;
+  const totalEl = document.getElementById('total-'+pfx);
   if (totalEl) totalEl.innerHTML = `<strong>${fmtNumAuto(newDosis * ha)}</strong>`;
 
   // Recalcular costo ha y costo total
@@ -1043,8 +1046,8 @@ function onDosisChange(supId, nro, fecha, prod, ha, val) {
       const precio = getPrecio(prodForPrice, rec.Unidad);
       const costoHa = precio !== null ? precio * newDosis : null;
       const costoTotal = precio !== null ? precio * newDosis * sup.ha : null;
-      const costoHaEl = document.getElementById('costoha-'+CSS.escape(k));
-      const costoTotEl = document.getElementById('costotot-'+CSS.escape(k));
+      const costoHaEl = document.getElementById('costoha-'+pfx);
+      const costoTotEl = document.getElementById('costotot-'+pfx);
       if (costoHaEl) costoHaEl.innerHTML = fmtCosto(costoHa);
       if (costoTotEl) costoTotEl.innerHTML = fmtCosto(costoTotal);
     }
@@ -1055,19 +1058,20 @@ function onFertChange(selectEl) {
   const cultivo = selectEl.dataset.cultivo;
   const rk = selectEl.dataset.rk;
   const ha = parseFloat(selectEl.dataset.ha);
+  const domId = selectEl.dataset.domId;
   const list = getFertFosList(cultivo);
   const opt = list.find(o => o.prod === selectEl.value);
   if (!opt) return;
   dosisOverrides[rk] = opt.dosis;
   prodNameOverrides[rk] = opt.prod;
-  const dosisEl = document.getElementById('dosis-'+CSS.escape(rk));
+  const pfx = domId || rk;
+  const dosisEl = document.getElementById('dosis-'+pfx);
   if (dosisEl) dosisEl.value = opt.dosis;
-  const totalEl = document.getElementById('total-'+CSS.escape(rk));
+  const totalEl = document.getElementById('total-'+pfx);
   if (totalEl) totalEl.textContent = fmtNumAuto(opt.dosis * ha);
-  // Update cost cells
   const precio = getPrecio(opt.prod, 'kg');
-  const costohaEl = document.getElementById('costoha-'+CSS.escape(rk));
-  const costototEl = document.getElementById('costotot-'+CSS.escape(rk));
+  const costohaEl = document.getElementById('costoha-'+pfx);
+  const costototEl = document.getElementById('costotot-'+pfx);
   if (costohaEl) costohaEl.innerHTML = fmtCosto(precio !== null ? precio * opt.dosis : null);
   if (costototEl) costototEl.innerHTML = fmtCosto(precio !== null ? precio * opt.dosis * ha : null);
 }
@@ -1155,6 +1159,7 @@ function renderPlanteo() {
         <table class="tbl-prod" style="table-layout:fixed;border-radius:0 0 6px 6px">
           ${colgroup}<tbody>`;
 
+    let rowIdx = 0;
     for (const gk of groupOrder) {
       const [fecha, cat] = gk.split('||');
       const items = groups[gk];
@@ -1167,9 +1172,10 @@ function renderPlanteo() {
       for (const r of items) {
         const k = rowKey(s.id, r);
         const dosis = getDosis(s.id, r);
+        const domId = `r${s.id}_${rowIdx++}`;
         const fertList = isFertFos(r, s.cultivo) ? getFertFosList(s.cultivo) : null;
         const prodCell = fertList
-          ? `<select class="fert-select" data-cultivo="${s.cultivo}" data-rk="${k}" data-ha="${s.ha}" onchange="onFertChange(this)">
+          ? `<select class="fert-select" data-cultivo="${s.cultivo}" data-rk="${k}" data-ha="${s.ha}" data-dom-id="${domId}" onchange="onFertChange(this)">
                ${fertList.map(o => `<option value="${o.prod}"${r['Produc/labor'].toLowerCase().includes(o.prod)?'selected':''}>${o.label}</option>`).join('')}
              </select>`
           : `<strong>${r['Produc/labor']}</strong>`;
@@ -1177,17 +1183,16 @@ function renderPlanteo() {
         const precio = getPrecio(prodForPrice, r.Unidad);
         const costoHa = precio !== null ? precio * dosis : null;
         const costoTotal = precio !== null ? precio * dosis * s.ha : null;
-        const safeK = k.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
         html += `<tr>
           <td>${prodCell}</td>
           <td>${tipoBadge(r.Tipo)}</td>
-          <td style="text-align:right"><input id="dosis-${k}" class="dosis-input" type="number" step="any" value="${dosis}"
-            data-sup-id="${s.id}" data-nro="${(r['Nro Registro']||'').replace(/"/g,'&quot;')}" data-fecha="${r.Fecha}" data-prod="${(r['Produc/labor']||'').replace(/"/g,'&quot;')}" data-ha="${s.ha}" data-rk="${safeK}"
+          <td style="text-align:right"><input id="dosis-${domId}" class="dosis-input" type="number" step="any" value="${dosis}"
+            data-sup-id="${s.id}" data-nro="${(r['Nro Registro']||'')}" data-fecha="${r.Fecha}" data-prod="${(r['Produc/labor']||'').replace(/"/g,'&quot;')}" data-ha="${s.ha}" data-k="${k}" data-dom-id="${domId}"
             onchange="onDosisChangeEl(this)" oninput="onDosisChangeEl(this)"></td>
           <td>${r.Unidad}</td>
-          <td id="total-${k}" style="text-align:right"><strong>${fmtNumAuto(dosis * s.ha)}</strong></td>
-          <td id="costoha-${k}" style="text-align:right">${fmtCosto(costoHa)}</td>
-          <td id="costotot-${k}" style="text-align:right">${fmtCosto(costoTotal)}</td>
+          <td id="total-${domId}" style="text-align:right"><strong>${fmtNumAuto(dosis * s.ha)}</strong></td>
+          <td id="costoha-${domId}" style="text-align:right">${fmtCosto(costoHa)}</td>
+          <td id="costotot-${domId}" style="text-align:right">${fmtCosto(costoTotal)}</td>
         </tr>`;
       }
     }
