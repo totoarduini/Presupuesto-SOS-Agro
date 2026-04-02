@@ -453,8 +453,8 @@ function csvToRecords(csvText) {
     const d = new Date(row['Fecha']);
     if (isNaN(d)) continue;
     row['Fecha'] = d.toISOString().substring(0,10);
-    row['Dosis'] = parseFloat(row['Dosis']) || 0;
-    row['Orden de Carga'] = parseInt(row['Orden de Carga']) || 9999;
+    row['Dosis'] = parseFloat(String(row['Dosis']).replace(',','.')) || 0;
+    row['Orden de Carga'] = parseInt(String(row['Orden de Carga']).replace(',','.')) || 9999;
     row['Antecesor'] = row['Antecesor'] || 'todos';
     row['Situacion'] = row['Situacion'] || 'todas';
     row['Nro Registro'] = row['Nro Registro'] || '';
@@ -483,10 +483,10 @@ function rebuildOptions(records) {
   for (const [cultivo, activs] of Object.entries(cultivoActivs)) {
     const sub = records.filter(r => activs.includes(normA(r.Activ)));
     let ants = [];
-    sub.forEach(r => { if(r.Antecesor!=='todos') ants.push(...splitTok(r.Antecesor)); });
+    sub.forEach(r => { if(r.Antecesor.toLowerCase()!=='todos') ants.push(...splitTok(r.Antecesor)); });
     if (['Trigo','Cebada'].includes(cultivo)) ants.push('Soja');
     let sits = [];
-    sub.forEach(r => { if(r.Situacion!=='todas') sits.push(...splitTok(r.Situacion)); });
+    sub.forEach(r => { if(r.Situacion.toLowerCase()!=='todas') sits.push(...splitTok(r.Situacion)); });
     newOpts[cultivo] = { activs, antecesores: dedupCi(ants), situaciones: dedupCi(sits) };
   }
   return newOpts;
@@ -611,21 +611,22 @@ function sitMatches(recordSit, selectedSit) {
   if (recordSit.toLowerCase() === 'todas') return true;
   const rs = recordSit.toLowerCase(), ss = selectedSit.toLowerCase();
   if (rs === ss) return true;
-  return recordSit.split(/\s+o\s+|,\s*|\s+y\s+/).map(s => s.trim().toLowerCase()).filter(Boolean).includes(ss);
+  return rs.split(/\s+o\s+|,\s*|\s+y\s+/).map(s => s.trim()).filter(Boolean).includes(ss);
 }
 function antMatches(recordAnt, selectedAnt) {
   if (recordAnt.toLowerCase() === 'todos') return true;
   const ra = recordAnt.toLowerCase(), sa = selectedAnt.toLowerCase();
   if (ra === sa) return true;
-  return recordAnt.split(/\s+o\s+|,\s*|\s+y\s+/).map(s => s.trim().toLowerCase()).filter(Boolean).includes(sa);
+  return ra.split(/\s+o\s+|,\s*|\s+y\s+/).map(s => s.trim()).filter(Boolean).includes(sa);
 }
-function ordenCarga(r) { const n = r['Orden de Carga']; return (n != null && !isNaN(n)) ? Number(n) : 9999; }
+function ordenCarga(r) { const n = parseFloat(String(r['Orden de Carga']||'').replace(',','.')); return !isNaN(n) ? n : 9999; }
 // Cuando un cultivo tiene solo 1 situación específica, agrega "Base" (= solo registros 'todas')
 const ACTIV_NORM = {'fina':'Fina','trigo':'Trigo','cebada':'Cebada','soja':'Soja','maiz':'Maiz','girasol':'Girasol','maiz tardio':'Maiz tardio'};
 function normActiv(a) { return ACTIV_NORM[String(a).toLowerCase().trim()] || a; }
 function getSituacionesDisplay(cultivo) {
   const sits = OPTIONS[cultivo]?.situaciones || [];
-  return sits.length === 1 ? ['Base', ...sits] : sits;
+  const hasBase = sits.some(s => s.toLowerCase() === 'base');
+  return hasBase ? sits : ['Base', ...sits];
 }
 function filterRecords(cultivo, antecesor, situacion) {
   const activs = OPTIONS[cultivo].activs;
