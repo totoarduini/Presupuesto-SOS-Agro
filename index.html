@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Presupuesto SOS Agro 26-27</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
   --verde: #2d6a2d;
@@ -308,7 +309,13 @@ tr:hover td { background: var(--verde-bg); }
 
   <div id="tabla-superficies-wrap"></div>
 
-  <div class="cards" id="resumen-cards" style="margin-top:14px"></div>
+  <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:14px;align-items:flex-start">
+    <div class="cards" id="resumen-cards" style="flex:1;min-width:200px"></div>
+    <div id="pie-chart-wrap" style="display:none;background:white;border:1px solid var(--verde-borde);border-radius:6px;padding:12px;width:260px;flex-shrink:0">
+      <div style="font-size:12px;font-weight:700;color:var(--acento);margin-bottom:8px">% de superficie por cultivo</div>
+      <canvas id="pie-chart" width="236" height="236"></canvas>
+    </div>
+  </div>
 </div>
 
 <!-- TAB 2: RESUMEN PLANTEO TÉCNICO -->
@@ -861,15 +868,20 @@ function renderSuperficies() {
     wrap.innerHTML = '<p class="empty">Ninguna superficie cargada. Usá el formulario de arriba para agregar combinaciones.</p>';
     updateCards();
     updateHeaderResumen();
+    updatePieChart();
     return;
   }
   let html = `<table><thead><tr><th>Cultivo</th><th>Antecesor</th><th>Situación</th><th class="num">Hectáreas</th><th>Ítems planteo</th><th></th></tr></thead><tbody>`;
   for (const s of superficies) {
     const recs = filterRecords(s.cultivo, s.antecesor, s.situacion);
+    const antOpts = (OPTIONS[s.cultivo]?.antecesores || []).map(a =>
+      `<option value="${a}"${a===s.antecesor?'selected':''}>${a}</option>`).join('');
+    const sitOpts = getSituacionesDisplay(s.cultivo).map(si =>
+      `<option value="${si}"${si===s.situacion?'selected':''}>${si}</option>`).join('');
     html += `<tr>
       <td>${cultivoBadge(s.cultivo)}</td>
-      <td>${s.antecesor}</td>
-      <td>${s.situacion}</td>
+      <td><select class="fert-select" style="min-width:110px" onchange="updateSupAntecesor(${s.id},this.value)">${antOpts}</select></td>
+      <td><select class="fert-select" style="min-width:100px" onchange="updateSupSituacion(${s.id},this.value)">${sitOpts}</select></td>
       <td class="num"><input class="ha-input" type="number" value="${s.ha}" min="0" step="0.1" onchange="updateHa(${s.id},this.value)" onblur="renderSuperficies()"></td>
       <td><small>${recs.length} ítems del planteo base</small></td>
       <td><button class="btn btn-danger" onclick="removeSuperficie(${s.id})">✕</button></td>
@@ -879,6 +891,61 @@ function renderSuperficies() {
   wrap.innerHTML = html;
   updateCards();
   updateHeaderResumen();
+  updatePieChart();
+}
+function updateSupAntecesor(id, val) {
+  const s = superficies.find(x => x.id === id);
+  if (!s) return;
+  s.antecesor = val;
+  // reset situacion to first available if no longer valid
+  const sits = getSituacionesDisplay(s.cultivo);
+  if (!sits.includes(s.situacion)) s.situacion = sits[0] || '';
+  renderSuperficies();
+  saveToCache();
+}
+function updateSupSituacion(id, val) {
+  const s = superficies.find(x => x.id === id);
+  if (s) { s.situacion = val; saveToCache(); }
+}
+let _pieChart = null;
+function updatePieChart() {
+  const wrap = document.getElementById('pie-chart-wrap');
+  if (!superficies.length) { wrap.style.display = 'none'; if (_pieChart) { _pieChart.destroy(); _pieChart = null; } return; }
+  wrap.style.display = 'block';
+  const byCultivo = {};
+  for (const s of superficies) {
+    byCultivo[s.cultivo] = (byCultivo[s.cultivo] || 0) + s.ha;
+  }
+  const labels = Object.keys(byCultivo);
+  const data = labels.map(c => byCultivo[c]);
+  const colorMap = {
+    'Trigo': '#c8a84b', 'Cebada': '#4a9a4a', 'Soja': '#2196f3',
+    'Maiz': '#e53935', 'Girasol': '#fdd835', 'Maiz tardio': '#8e24aa'
+  };
+  const colors = labels.map(c => colorMap[c] || '#90a4ae');
+  const ctx = document.getElementById('pie-chart').getContext('2d');
+  if (_pieChart) _pieChart.destroy();
+  _pieChart = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: colors, borderColor: '#fff', borderWidth: 2 }]
+    },
+    options: {
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 }, boxWidth: 14, padding: 8 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const total = ctx.dataset.data.reduce((a,b)=>a+b,0);
+              const pct = total ? ((ctx.parsed/total)*100).toFixed(1) : 0;
+              return ` ${fmtNum(ctx.parsed,1)} ha (${pct}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
 }
 function updateCards() {
   const totalHa = superficies.reduce((a,s) => a+s.ha, 0);
@@ -892,6 +959,7 @@ function updateCards() {
     html += `<div class="card"><div class="card-label">${c}</div><div class="card-value">${fmtNum(ha,1)}</div><div class="card-sub">ha</div></div>`;
   }
   document.getElementById('resumen-cards').innerHTML = html;
+  updatePieChart();
 }
 function updateHeaderResumen() {
   const totalHa = superficies.reduce((a,s) => a+s.ha, 0);
@@ -946,6 +1014,14 @@ function rowKey(supId, r) {
 function getDosis(supId, r) {
   const k = rowKey(supId, r);
   return dosisOverrides[k] != null ? dosisOverrides[k] : r.Dosis;
+}
+function onDosisChangeEl(el) {
+  const supId = parseInt(el.dataset.supId);
+  const nro = el.dataset.nro;
+  const fecha = el.dataset.fecha;
+  const prod = el.dataset.prod;
+  const ha = parseFloat(el.dataset.ha);
+  onDosisChange(supId, nro, fecha, prod, ha, el.value);
 }
 function onDosisChange(supId, nro, fecha, prod, ha, val) {
   const k = `${supId}|${nro}|${fecha}|${prod}`;
@@ -1101,12 +1177,13 @@ function renderPlanteo() {
         const precio = getPrecio(prodForPrice, r.Unidad);
         const costoHa = precio !== null ? precio * dosis : null;
         const costoTotal = precio !== null ? precio * dosis * s.ha : null;
+        const safeK = k.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
         html += `<tr>
           <td>${prodCell}</td>
           <td>${tipoBadge(r.Tipo)}</td>
           <td style="text-align:right"><input id="dosis-${k}" class="dosis-input" type="number" step="any" value="${dosis}"
-            onchange="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"
-            oninput="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"></td>
+            data-sup-id="${s.id}" data-nro="${(r['Nro Registro']||'').replace(/"/g,'&quot;')}" data-fecha="${r.Fecha}" data-prod="${(r['Produc/labor']||'').replace(/"/g,'&quot;')}" data-ha="${s.ha}" data-rk="${safeK}"
+            onchange="onDosisChangeEl(this)" oninput="onDosisChangeEl(this)"></td>
           <td>${r.Unidad}</td>
           <td id="total-${k}" style="text-align:right"><strong>${fmtNumAuto(dosis * s.ha)}</strong></td>
           <td id="costoha-${k}" style="text-align:right">${fmtCosto(costoHa)}</td>
@@ -2133,6 +2210,7 @@ document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) doc
       </div>
     </div>
   </div>
+  <div class="tl-legend" id="tl-legend" style="margin-bottom:10px"></div>
   <div id="timeline-content"></div>
   <div class="tl-popup" id="tl-popup">
     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px">
