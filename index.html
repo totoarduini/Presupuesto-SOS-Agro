@@ -445,7 +445,9 @@ function csvToRecords(csvText) {
     const row = {};
     headers.forEach((h,i) => row[h] = (vals[i]||'').trim().replace(/^"|"$/g,''));
     if (!row['Fecha'] || !row['Activ'] || !row['Produc/labor']) continue;
-    if (!['Fina','Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio'].includes(row['Activ'])) continue;
+    const normActCsv = {'fina':'Fina','trigo':'Trigo','cebada':'Cebada','soja':'Soja','maiz':'Maiz','girasol':'Girasol','maiz tardio':'Maiz tardio'};
+    row['Activ'] = normActCsv[row['Activ'].toLowerCase().trim()] || row['Activ'];
+    if (!Object.values(normActCsv).includes(row['Activ'])) continue;
     if (!row['Tipo']) continue;
     // Parse date
     const d = new Date(row['Fecha']);
@@ -467,6 +469,8 @@ function rebuildOptions(records) {
     'Trigo':['Fina','Trigo'],'Cebada':['Fina','Cebada'],'Soja':['Soja'],
     'Maiz':['Maiz'],'Girasol':['Girasol'],'Maiz tardio':['Maiz tardio']
   };
+  const activNormMap = {'fina':'Fina','trigo':'Trigo','cebada':'Cebada','soja':'Soja','maiz':'Maiz','girasol':'Girasol','maiz tardio':'Maiz tardio'};
+  function normA(a) { return activNormMap[String(a).toLowerCase().trim()] || a; }
   function splitTok(s) {
     return String(s).split(/\s+o\s+|,\s*|\s+y\s+/).map(t=>t.trim()).filter(Boolean);
   }
@@ -477,7 +481,7 @@ function rebuildOptions(records) {
   }
   const newOpts = {};
   for (const [cultivo, activs] of Object.entries(cultivoActivs)) {
-    const sub = records.filter(r => activs.includes(r.Activ));
+    const sub = records.filter(r => activs.includes(normA(r.Activ)));
     let ants = [];
     sub.forEach(r => { if(r.Antecesor!=='todos') ants.push(...splitTok(r.Antecesor)); });
     if (['Trigo','Cebada'].includes(cultivo)) ants.push('Soja');
@@ -604,19 +608,21 @@ function mesToNombre(m) {
 //  CORE: FILTER RECORDS
 // ============================================================
 function sitMatches(recordSit, selectedSit) {
-  if (recordSit === 'todas') return true;
+  if (recordSit.toLowerCase() === 'todas') return true;
   const rs = recordSit.toLowerCase(), ss = selectedSit.toLowerCase();
   if (rs === ss) return true;
   return recordSit.split(/\s+o\s+|,\s*|\s+y\s+/).map(s => s.trim().toLowerCase()).filter(Boolean).includes(ss);
 }
 function antMatches(recordAnt, selectedAnt) {
-  if (recordAnt === 'todos') return true;
+  if (recordAnt.toLowerCase() === 'todos') return true;
   const ra = recordAnt.toLowerCase(), sa = selectedAnt.toLowerCase();
   if (ra === sa) return true;
   return recordAnt.split(/\s+o\s+|,\s*|\s+y\s+/).map(s => s.trim().toLowerCase()).filter(Boolean).includes(sa);
 }
 function ordenCarga(r) { const n = r['Orden de Carga']; return (n != null && !isNaN(n)) ? Number(n) : 9999; }
 // Cuando un cultivo tiene solo 1 situación específica, agrega "Base" (= solo registros 'todas')
+const ACTIV_NORM = {'fina':'Fina','trigo':'Trigo','cebada':'Cebada','soja':'Soja','maiz':'Maiz','girasol':'Girasol','maiz tardio':'Maiz tardio'};
+function normActiv(a) { return ACTIV_NORM[String(a).toLowerCase().trim()] || a; }
 function getSituacionesDisplay(cultivo) {
   const sits = OPTIONS[cultivo]?.situaciones || [];
   return sits.length === 1 ? ['Base', ...sits] : sits;
@@ -624,10 +630,10 @@ function getSituacionesDisplay(cultivo) {
 function filterRecords(cultivo, antecesor, situacion) {
   const activs = OPTIONS[cultivo].activs;
   return RECORDS.filter(r =>
-    activs.includes(r.Activ) &&
+    activs.includes(normActiv(r.Activ)) &&
     antMatches(r.Antecesor, antecesor) &&
     sitMatches(r.Situacion, situacion) &&
-    r['E/I'] === 'Egreso' && r.Tipo !== 'Grano'
+    r['E/I'].toLowerCase() === 'egreso' && r.Tipo.toLowerCase() !== 'grano'
   ).sort((a,b) => a.Fecha.localeCompare(b.Fecha) || ordenCarga(a)-ordenCarga(b));
 }
 
@@ -964,7 +970,7 @@ function buildMs(msId, btnId, items, placeholder) {
 }
 function updateCmpFiltros() {
   const cultivo = document.getElementById('cmp-cultivo').value;
-  const tipos = [...new Set(RECORDS.filter(r=>r['E/I']==='Egreso'&&r.Tipo!=='Grano').map(r=>r.Tipo))].sort();
+  const tipos = [...new Set(RECORDS.filter(r=>r['E/I'].toLowerCase()==='egreso'&&r.Tipo.toLowerCase()!=='grano').map(r=>r.Tipo))].sort();
   const selTipo = document.getElementById('cmp-tipo');
   selTipo.innerHTML = '<option value="">Todos</option>';
   for (const t of tipos) selTipo.innerHTML += `<option>${t}</option>`;
@@ -1095,7 +1101,7 @@ function renderComparativo() {
 //  TAB 4: RESUMEN INSUMOS
 // ============================================================
 function populateInsTipos() {
-  const tipos = [...new Set(RECORDS.filter(r=>r['E/I']==='Egreso'&&r.Tipo!=='Grano').map(r=>r.Tipo))].sort();
+  const tipos = [...new Set(RECORDS.filter(r=>r['E/I'].toLowerCase()==='egreso'&&r.Tipo.toLowerCase()!=='grano').map(r=>r.Tipo))].sort();
   const sel = document.getElementById('ins-tipo');
   const cur = sel.value;
   sel.innerHTML = '<option value="">Todos</option>';
