@@ -20,10 +20,10 @@
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: var(--text); background: #eef2ee; }
-header { background: var(--header-bg); color: white; padding: 10px 18px; display: flex; align-items: center; gap: 14px; }
+header { background: var(--header-bg); color: white; padding: 10px 18px; display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 100; }
 header h1 { font-size: 16px; font-weight: 600; }
 header span { font-size: 12px; opacity: .7; }
-.tabs { display: flex; background: var(--verde); overflow-x: auto; }
+.tabs { display: flex; background: var(--verde); overflow-x: auto; position: sticky; top: 44px; z-index: 99; }
 .tab-btn { padding: 9px 16px; color: rgba(255,255,255,.75); cursor: pointer; white-space: nowrap; border: none; background: none; font-size: 13px; font-weight: 500; transition: background .15s; }
 .tab-btn:hover { background: rgba(255,255,255,.12); color: white; }
 .tab-btn.active { background: var(--verde-bg); color: var(--acento); font-weight: 700; border-bottom: 3px solid var(--verde-claro); }
@@ -43,6 +43,10 @@ header span { font-size: 12px; opacity: .7; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-export { background: #2c6e49; color: white; }
 table { width: 100%; border-collapse: collapse; background: white; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+/* Tables inside sticky wrappers must NOT clip — sticky th needs overflow visible */
+.sticky-table-wrap table,
+.planteo-tbl-container table,
+.pivot-table table { overflow: visible !important; border-radius: 0; box-shadow: none; }
 th { background: var(--verde); color: white; padding: 7px 10px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; white-space: nowrap; }
 td { padding: 6px 10px; border-bottom: 1px solid var(--gris-borde); vertical-align: middle; text-align: center; }
 tr:last-child td { border-bottom: none; }
@@ -177,32 +181,54 @@ tr:hover td { background: var(--verde-bg); }
 
 .sync-status { font-size: 11px; }
 
-/* Sticky table headers */
+/* ── Sticky column headers ──────────────────────────────────
+   Header + tabs are position:sticky. Table th also sticky.
+   The actual top offset is calculated by JS (updateStickyTop)
+   after render. The CSS value here is just a safe fallback.
+──────────────────────────────────────────────────────────── */
 .sticky-table-wrap { overflow-x: auto; }
-.sticky-table-wrap table thead tr th {
+.sticky-table-wrap table { overflow: visible !important; border-radius: 0; }
+.sticky-table-wrap thead th {
   position: sticky;
-  top: 0;
-  z-index: 10;
+  top: 82px;
+  z-index: 20;
   background: var(--verde);
-  box-shadow: 0 2px 2px rgba(0,0,0,.15);
+  box-shadow: 0 2px 3px rgba(0,0,0,.18);
 }
-/* For planteo sections inside scroll container */
-.planteo-scroll { max-height: calc(100vh - 180px); overflow-y: auto; }
-.planteo-scroll .tbl-prod thead tr th {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--verde);
-  box-shadow: 0 2px 2px rgba(0,0,0,.12);
+/* border-collapse:collapse + sticky = bug en algunos browsers.
+   Solución: separar borders en tablas con sticky headers */
+.planteo-tbl-container table,
+.pivot-table table,
+.sticky-table-wrap table {
+  border-collapse: separate !important;
+  border-spacing: 0;
 }
-/* Comparativo pivot sticky */
-.pivot-table { overflow-x: auto; max-height: calc(100vh - 200px); }
-.pivot-table table thead tr th {
+.planteo-tbl-container td,
+.pivot-table td,
+.sticky-table-wrap td {
+  border-bottom: 1px solid var(--gris-borde);
+}
+.planteo-tbl-container thead th,
+.pivot-table thead th,
+.sticky-table-wrap thead th {
+  border-bottom: 2px solid rgba(255,255,255,.2);
+}
+.planteo-tbl-container { overflow-x: auto; border-radius: 0 0 6px 6px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+.planteo-tbl-container thead th {
   position: sticky;
-  top: 0;
-  z-index: 10;
+  top: 82px;
+  z-index: 20;
   background: var(--verde);
-  box-shadow: 0 2px 2px rgba(0,0,0,.12);
+  box-shadow: 0 2px 3px rgba(0,0,0,.18);
+}
+.pivot-table { overflow-x: auto; }
+.pivot-table table { overflow: visible !important; border-radius: 0; }
+.pivot-table thead th {
+  position: sticky;
+  top: 82px;
+  z-index: 20;
+  background: var(--verde);
+  box-shadow: 0 2px 3px rgba(0,0,0,.18);
 }
 </style>
 </head>
@@ -311,7 +337,7 @@ tr:hover td { background: var(--verde-bg); }
       </div>
     </div>
   </div>
-  <div class="planteo-scroll" id="planteo-content"></div>
+  <div id="planteo-content"></div>
 </div>
 
 <!-- TAB 3: COMPARATIVO -->
@@ -724,6 +750,7 @@ function showTab(name) {
   if (name === 'mensual') renderMensual();
   if (name === 'precios') renderPrecios();
   if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
+  requestAnimationFrame(updateStickyTop);
 }
 
 // ============================================================
@@ -855,6 +882,10 @@ function isFertFos(r, cultivo) {
 function rowKey(supId, r) {
   return `${supId}|${r['Nro Registro']}|${r.Fecha}|${r['Produc/labor']}`;
 }
+function safeId(k) {
+  // Convert rowKey to a DOM-safe id (no pipes, spaces, special chars)
+  return k.replace(/[^a-zA-Z0-9\-_]/g, '_');
+}
 function getDosis(supId, r) {
   const k = rowKey(supId, r);
   return dosisOverrides[k] != null ? dosisOverrides[k] : r.Dosis;
@@ -863,9 +894,10 @@ function onDosisChange(supId, nro, fecha, prod, ha, val) {
   const k = `${supId}|${nro}|${fecha}|${prod}`;
   dosisOverrides[k] = parseFloat(val) || 0;
   const dosis = dosisOverrides[k];
+  const sid = safeId(k);
 
   // Update total cell inline (columna "Total ha")
-  const totalEl = document.getElementById('total-'+CSS.escape(k));
+  const totalEl = document.getElementById('total-'+sid);
   if (totalEl) totalEl.innerHTML = `<strong>${fmtNumAuto(dosis * ha)}</strong>`;
 
   // Update u$s/ha and u$s total cells inline
@@ -878,8 +910,8 @@ function onDosisChange(supId, nro, fecha, prod, ha, val) {
       const precio = getPrecio(pn, rec.Unidad);
       const costoHa = precio !== null ? precio * dosis : null;
       const costoTot = precio !== null ? precio * dosis * ha : null;
-      const costoHaEl = document.getElementById('costoha-'+CSS.escape(k));
-      const costoTotEl = document.getElementById('costotot-'+CSS.escape(k));
+      const costoHaEl = document.getElementById('costoha-'+sid);
+      const costoTotEl = document.getElementById('costotot-'+sid);
       if (costoHaEl) costoHaEl.innerHTML = fmtCosto(costoHa);
       if (costoTotEl) costoTotEl.innerHTML = fmtCosto(costoTot);
     }
@@ -888,7 +920,7 @@ function onDosisChange(supId, nro, fecha, prod, ha, val) {
   // Recalculate the total-cost bar for this superficie
   _recalcTotalBar(supId);
 
-  // Propagate to all other tabs that aggregate data (re-render silently if they're not visible)
+  // Propagate to other tabs if visible
   if (document.getElementById('tab-insumos').classList.contains('active')) renderInsumos();
   if (document.getElementById('tab-mensual').classList.contains('active')) renderMensual();
   if (document.getElementById('tab-porha').classList.contains('active')) renderPorha();
@@ -999,14 +1031,14 @@ function onFertChange(selectEl) {
   if (!opt) return;
   dosisOverrides[rk] = opt.dosis;
   prodNameOverrides[rk] = opt.prod;
-  const dosisEl = document.getElementById('dosis-'+CSS.escape(rk));
+  const dosisEl = document.getElementById('dosis-'+safeId(rk));
   if (dosisEl) dosisEl.value = opt.dosis;
-  const totalEl = document.getElementById('total-'+CSS.escape(rk));
-  if (totalEl) totalEl.textContent = fmtNumAuto(opt.dosis * ha);
+  const totalEl = document.getElementById('total-'+safeId(rk));
+  if (totalEl) totalEl.innerHTML = `<strong>${fmtNumAuto(opt.dosis * ha)}</strong>`;
   // Update cost cells
   const precio = getPrecio(opt.prod, 'kg');
-  const costohaEl = document.getElementById('costoha-'+CSS.escape(rk));
-  const costototEl = document.getElementById('costotot-'+CSS.escape(rk));
+  const costohaEl = document.getElementById('costoha-'+safeId(rk));
+  const costototEl = document.getElementById('costotot-'+safeId(rk));
   if (costohaEl) costohaEl.innerHTML = fmtCosto(precio !== null ? precio * opt.dosis : null);
   if (costototEl) costototEl.innerHTML = fmtCosto(precio !== null ? precio * opt.dosis * ha : null);
   saveState();
@@ -1043,7 +1075,7 @@ function renderPlanteo() {
       <div class="planteo-cultivo-header">${cultivoBadge(s.cultivo)}
         <small>Ant: ${s.antecesor} &nbsp;|&nbsp; Sit: ${s.situacion} &nbsp;|&nbsp; ${fmtNum(s.ha,1)} ha · ${recs.length} ítems</small>
       </div>
-      <div class="sticky-table-wrap"><table class="tbl-prod"><thead><tr>
+      <div class="planteo-tbl-container"><table class="tbl-prod"><thead><tr>
         <th style="text-align:left">Producto / Labor</th><th>Tipo</th><th>Categoría</th>
         <th>Dosis/ha</th><th>Unidad</th>
         <th>Total (${fmtNum(s.ha,1)} ha)</th>
@@ -1085,13 +1117,13 @@ function renderPlanteo() {
           <td style="text-align:left">${prodCell}</td>
           <td>${tipoBadge(r.Tipo)}</td>
           <td><span style="font-size:11px;color:#666">${r.Categoria}</span></td>
-          <td><input id="dosis-${k}" class="dosis-input" type="number" step="any" value="${dosis}"
+          <td><input id="dosis-${safeId(k)}" class="dosis-input" type="number" step="any" value="${dosis}"
             onchange="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"
             oninput="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"></td>
           <td>${r.Unidad}</td>
-          <td id="total-${k}"><strong>${fmtNumAuto(dosis * s.ha)}</strong></td>
-          <td id="costoha-${k}">${fmtCosto(costoHa)}</td>
-          <td id="costotot-${k}">${fmtCosto(costoTotal)}</td>
+          <td id="total-${safeId(k)}"><strong>${fmtNumAuto(dosis * s.ha)}</strong></td>
+          <td id="costoha-${safeId(k)}">${fmtCosto(costoHa)}</td>
+          <td id="costotot-${safeId(k)}">${fmtCosto(costoTotal)}</td>
         </tr>`;
       }
     }
@@ -1114,6 +1146,7 @@ function renderPlanteo() {
     html += `</div>`;
   }
   wrap.innerHTML = html;
+  requestAnimationFrame(updateStickyTop);
 }
 
 // ============================================================
@@ -1299,10 +1332,11 @@ function renderComparativo() {
   }
   html += `</tbody></table></div>`;
   wrap.innerHTML = html;
+  requestAnimationFrame(updateStickyTop);
 }
 
 // ============================================================
-//  TAB 4: RESUMEN INSUMOS
+//  TAB 4: RESUMEN INSUMOS\
 // ============================================================
 function populateInsTipos() {
   const tipos = [...new Set(RECORDS.filter(r=>r['E/I'].toLowerCase()==='egreso'&&r.Tipo.toLowerCase()!=='grano').map(r=>r.Tipo))].sort();
@@ -1943,6 +1977,18 @@ function renderTimeline() {
   wrap.innerHTML = html;
 }
 
+// Sticky header offset: recalculate after render
+function updateStickyTop() {
+  const h = document.querySelector('header');
+  const t = document.querySelector('.tabs');
+  if (!h || !t) return;
+  const offset = h.offsetHeight + t.offsetHeight;
+  document.querySelectorAll('.planteo-tbl-container thead th, .pivot-table thead th, .sticky-table-wrap thead th').forEach(el => {
+    el.style.top = offset + 'px';
+  });
+}
+window.addEventListener('resize', updateStickyTop);
+
 // init
 const _stateLoaded = loadState();
 renderSuperficies();
@@ -1950,11 +1996,11 @@ initPorhaAnts();
 updatePltFiltros();
 populateInsTipos();
 if (_stateLoaded && superficies.length) {
-  // Restore rendered state after loading from cache
   renderPlanteo();
   renderInsumos();
   renderMensual();
 }
+requestAnimationFrame(updateStickyTop);
 // close multiselect on click outside
 document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) document.querySelectorAll('.ms-dropdown').forEach(d=>d.classList.remove('open')); });
 </script>
