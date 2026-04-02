@@ -196,6 +196,22 @@ tr:hover td { background: var(--verde-bg); }
 }
 .table-scroll-wrap { overflow-x: auto; }
 
+/* Planteo: encabezado sticky separado igual que comparativo */
+.plt-thead-sticky {
+  position: sticky;
+  top: var(--sticky-top, 0px);
+  z-index: 20;
+  overflow: hidden;
+}
+.plt-thead-sticky table {
+  margin-bottom: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,.15) !important;
+}
+.plt-body table {
+  border-radius: 0 0 6px 6px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.07) !important;
+}
 /* Comparativo: encabezado sticky separado del body scrollable */
 .cmp-thead-sticky {
   position: sticky;
@@ -219,14 +235,7 @@ tr:hover td { background: var(--verde-bg); }
   box-shadow: 0 1px 3px rgba(0,0,0,.07) !important;
 }
 
-/* Planteo: mismo approach para tbl-sticky dentro de cat-group */
-.tbl-sticky thead tr th {
-  position: sticky;
-  top: var(--sticky-top, 0px);
-  z-index: 10;
-  background: var(--verde);
-  box-shadow: 0 2px 3px rgba(0,0,0,.15);
-}
+
 
 /* Fila de sub-header de secciones (fecha/categoria) también queda bajo el encabezado */
 .section-subheader-sticky {
@@ -1006,18 +1015,19 @@ function renderPlanteo() {
     wrap.innerHTML = '<p class="empty">Sin superficies para los filtros seleccionados.</p>';
     return;
   }
+  const fCats = getMsSelected('ms-plt-cat');
+  const pltId = 'plt-table';
   let html = '';
+
   for (const s of sups) {
     let recs = filterRecords(s.cultivo, s.antecesor, s.situacion);
     if (fTipos.length > 0) recs = recs.filter(r => fTipos.includes(r.Tipo));
-    const fCats = getMsSelected('ms-plt-cat');
-    if (fCats.length > 0) recs = recs.filter(r => fCats.includes(r.Categoria));
-    // Attach cultivo to each rec for fertilizante detection
+    if (fCats.length > 0)  recs = recs.filter(r => fCats.includes(r.Categoria));
     recs.forEach(r => r._cultivo = s.cultivo);
-    html += `<div style="margin-bottom:24px">
-      <div class="planteo-cultivo-header">${cultivoBadge(s.cultivo)}
-        <small>Ant: ${s.antecesor} &nbsp;|&nbsp; Sit: ${s.situacion} &nbsp;|&nbsp; ${fmtNum(s.ha,1)} ha · ${recs.length} ítems</small>
-      </div>`;
+
+    const supUid = `plt-${s.id}`;
+
+    // Agrupar por fecha+categoria para filas de sección
     const groups = {};
     const groupOrder = [];
     for (const r of recs) {
@@ -1025,29 +1035,66 @@ function renderPlanteo() {
       if (!groups[k]) { groups[k] = []; groupOrder.push(k); }
       groups[k].push(r);
     }
+
+    // Costo total
+    let totalCostoSup = 0, nSinPrecio = 0;
+    for (const r of recs) {
+      const rk = rowKey(s.id, r);
+      const d = getDosis(s.id, r);
+      const pn = prodNameOverrides[rk] || r['Produc/labor'];
+      const p = getPrecio(pn, r.Unidad);
+      if (p !== null) totalCostoSup += p * d * s.ha;
+      else nSinPrecio++;
+    }
+
+    // Colgroup con anchos fijos iguales para todas las superficies
+    const colgroup = `<colgroup>
+      <col style="width:30%"><col style="width:11%">
+      <col style="width:9%"><col style="width:8%">
+      <col style="width:13%"><col style="width:11%"><col style="width:11%">
+    </colgroup>`;
+    const theadRow = `<tr>
+      <th style="text-align:left;border-radius:6px 0 0 0">Producto / Labor</th>
+      <th>Tipo</th><th style="text-align:right">Dosis/ha</th><th>Unidad</th>
+      <th style="text-align:right">Total (${fmtNum(s.ha,1)} ha)</th>
+      <th style="text-align:right">u$s/ha</th>
+      <th style="text-align:right;border-radius:0 6px 0 0">u$s total</th>
+    </tr>`;
+
+    html += `<div class="planteo-section" style="margin-bottom:28px">
+      <!-- Encabezado del cultivo/situacion -->
+      <div class="planteo-cultivo-header">${cultivoBadge(s.cultivo)}
+        <small>Ant: ${s.antecesor} &nbsp;|&nbsp; Sit: ${s.situacion} &nbsp;|&nbsp; ${fmtNum(s.ha,1)} ha · ${recs.length} ítems</small>
+      </div>
+
+      <!-- Header sticky separado (igual que comparativo) -->
+      <div class="plt-thead-sticky" id="plt-thead-${supUid}">
+        <table class="tbl-prod" style="table-layout:fixed;margin-bottom:0;border-radius:0;box-shadow:none">
+          ${colgroup}<thead>${theadRow}</thead>
+        </table>
+      </div>
+
+      <!-- Cuerpo: una sola tabla con filas de sección intercaladas -->
+      <div class="plt-body" id="plt-body-${supUid}">
+        <table class="tbl-prod" style="table-layout:fixed;border-radius:0 0 6px 6px">
+          ${colgroup}<tbody>`;
+
     for (const gk of groupOrder) {
       const [fecha, cat] = gk.split('||');
       const items = groups[gk];
-      html += `<div class="cat-group">
-        <div class="cat-header">
-          <span>📅 <strong>${fecha}</strong> &nbsp;—&nbsp; ${cat}</span>
-          <span style="font-size:11px;color:#aaa">${items.length} ítem${items.length>1?'s':''}</span>
-        </div>
-        <table class="tbl-prod tbl-sticky"><thead><tr>
-          <th>Producto / Labor</th><th>Tipo</th>
-          <th>Dosis/ha</th><th>Unidad</th>
-          <th>Total (${fmtNum(s.ha,1)} ha)</th>
-          <th>u$s/ha</th><th>u$s total</th>
-        </tr></thead><tbody>`;
+      // Fila de sección (fecha / categoría)
+      html += `<tr style="background:var(--verde-bg)">
+        <td colspan="7" style="text-align:left;padding:6px 10px;font-weight:700;font-size:12px;color:var(--acento);border-top:2px solid var(--verde-borde)">
+          📅 <strong>${fecha}</strong> &nbsp;—&nbsp; ${cat}
+          <span style="font-weight:400;font-size:11px;color:#888;margin-left:8px">${items.length} ítem${items.length>1?'s':''}</span>
+        </td></tr>`;
       for (const r of items) {
         const k = rowKey(s.id, r);
         const dosis = getDosis(s.id, r);
         const fertList = isFertFos(r, s.cultivo) ? getFertFosList(s.cultivo) : null;
         const prodCell = fertList
-          ? `<select class="fert-select"
-              data-cultivo="${s.cultivo}" data-rk="${k}" data-ha="${s.ha}"
-              onchange="onFertChange(this)">
-              ${fertList.map(o => `<option value="${o.prod}"${r['Produc/labor'].toLowerCase().includes(o.prod)?'selected':''}>${o.label}</option>`).join('')}
+          ? `<select class="fert-select" data-cultivo="${s.cultivo}" data-rk="${k}" data-ha="${s.ha}" onchange="onFertChange(this)">
+               ${fertList.map(o => `<option value="${o.prod}"${r['Produc/labor'].toLowerCase().includes(o.prod)?'selected':''}>${o.label}</option>`).join('')}
              </select>`
           : `<strong>${r['Produc/labor']}</strong>`;
         const prodForPrice = prodNameOverrides[k] || r['Produc/labor'];
@@ -1057,35 +1104,34 @@ function renderPlanteo() {
         html += `<tr>
           <td>${prodCell}</td>
           <td>${tipoBadge(r.Tipo)}</td>
-          <td><input id="dosis-${k}" class="dosis-input" type="number" step="any" value="${dosis}"
+          <td style="text-align:right"><input id="dosis-${k}" class="dosis-input" type="number" step="any" value="${dosis}"
             onchange="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"
             oninput="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"></td>
           <td>${r.Unidad}</td>
-          <td id="total-${k}"><strong>${fmtNumAuto(dosis * s.ha)}</strong></td>
-          <td id="costoha-${k}">${fmtCosto(costoHa)}</td>
-          <td id="costotot-${k}">${fmtCosto(costoTotal)}</td>
+          <td id="total-${k}" style="text-align:right"><strong>${fmtNumAuto(dosis * s.ha)}</strong></td>
+          <td id="costoha-${k}" style="text-align:right">${fmtCosto(costoHa)}</td>
+          <td id="costotot-${k}" style="text-align:right">${fmtCosto(costoTotal)}</td>
         </tr>`;
       }
-      html += `</tbody></table></div>`;
     }
-    // Total costo de esta superficie
-    const allRecsForCost = recs;
-    let totalCostoSup = 0, nSinPrecio = 0;
-    for (const r of allRecsForCost) {
-      const rk = rowKey(s.id, r);
-      const d = getDosis(s.id, r);
-      const pn = prodNameOverrides[rk] || r['Produc/labor'];
-      const p = getPrecio(pn, r.Unidad);
-      if (p !== null) totalCostoSup += p * d * s.ha;
-      else nSinPrecio++;
-    }
-    html += `<div class="total-costo-bar">
-      <span>💵 Costo total estimado: <strong>u$s ${totalCostoSup.toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0})}</strong></span>
-      ${nSinPrecio>0?`<span style="color:#999">${nSinPrecio} ítem(s) sin precio</span>`:''}
+
+    html += `</tbody></table></div>
+      <div class="total-costo-bar">
+        <span>💵 Costo total estimado: <strong>u$s ${totalCostoSup.toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0})}</strong></span>
+        ${nSinPrecio>0?`<span style="color:#999">${nSinPrecio} ítem(s) sin precio</span>`:''}
+      </div>
     </div>`;
-    html += `</div>`;
   }
+
   wrap.innerHTML = html;
+
+  // Sticky top para cada header de superficie
+  setTimeout(() => {
+    document.querySelectorAll('.plt-thead-sticky').forEach(el => {
+      el.style.setProperty('top', getComputedStyle(document.documentElement).getPropertyValue('--sticky-top') || '0px');
+    });
+    updateStickyTop();
+  }, 30);
 }
 
 // ============================================================
