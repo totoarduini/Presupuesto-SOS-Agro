@@ -42,7 +42,9 @@ header span { font-size: 12px; opacity: .7; }
 .btn-danger { background: #c0392b; color: white; padding: 3px 8px; font-size: 11px; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-export { background: #2c6e49; color: white; }
-table { width: 100%; border-collapse: collapse; background: white; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+table { width: 100%; border-collapse: collapse; background: white; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+/* overflow:hidden en table rompe position:sticky del thead — se usa clip en su lugar */
+.tbl-sticky { overflow: clip; }
 th { background: var(--verde); color: white; padding: 7px 10px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; white-space: nowrap; }
 td { padding: 6px 10px; border-bottom: 1px solid var(--gris-borde); vertical-align: middle; text-align: center; }
 tr:last-child td { border-bottom: none; }
@@ -193,20 +195,43 @@ tr:hover td { background: var(--verde-bg); }
   box-shadow: 0 3px 8px rgba(0,0,0,.08);
 }
 .table-scroll-wrap { overflow-x: auto; }
+
+/* Comparativo: encabezado sticky separado del body scrollable */
+.cmp-thead-sticky {
+  position: sticky;
+  top: var(--sticky-top, 0px);
+  z-index: 20;
+  overflow: hidden;   /* oculta el scroll del header — se sincroniza por JS */
+  border-radius: 6px 6px 0 0;
+}
+.cmp-thead-sticky table {
+  margin-bottom: 0 !important;
+  border-bottom: none !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,.15) !important;
+}
+.cmp-body-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  border-radius: 0 0 6px 6px;
+}
+.cmp-body-scroll table {
+  border-radius: 0 0 6px 6px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.07) !important;
+}
+
+/* Planteo: mismo approach para tbl-sticky dentro de cat-group */
 .tbl-sticky thead tr th {
   position: sticky;
-  top: 0;
+  top: var(--sticky-top, 0px);
   z-index: 10;
   background: var(--verde);
   box-shadow: 0 2px 3px rgba(0,0,0,.15);
 }
-.pivot-table-sticky { overflow-x: auto; }
-.pivot-table-sticky table thead th {
+
+/* Fila de sub-header de secciones (fecha/categoria) también queda bajo el encabezado */
+.section-subheader-sticky {
   position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--verde);
-  box-shadow: 0 2px 3px rgba(0,0,0,.15);
+  left: 0;
 }
 
 </style>
@@ -1089,8 +1114,14 @@ function toggleMsAll(msId, btnId, allChkId, label) {
   document.querySelectorAll(`#${msId} input:not(#${allChkId})`).forEach(cb => cb.checked = checked);
   const count = document.querySelectorAll(`#${msId} input:not(#${allChkId})`).length;
   document.getElementById(btnId).textContent = checked ? `${label} (${count})` : `${label} (0)`;
-  if (msId.startsWith('ms-plt')) renderPlanteo();
-  else renderComparativo();
+  if (msId === 'ms-ant' || msId === 'ms-sit') {
+    updateCmpCategorias();
+    renderComparativo();
+  } else if (msId.startsWith('ms-plt')) {
+    renderPlanteo();
+  } else {
+    renderComparativo();
+  }
 }
 function refreshMsBtn(msId, btnId) {
   const sel = getMsSelected(msId);
@@ -1099,9 +1130,15 @@ function refreshMsBtn(msId, btnId) {
   const isSit = msId.includes('sit');
   if (sel.length === 0 || sel.length === total) btn.textContent = isSit ? `Todas (${total})` : `Todos (${total})`;
   else btn.textContent = sel.length === 1 ? sel[0] : `${sel.length} seleccionados`;
-  // Trigger render for the right tab
-  if (msId.startsWith('ms-plt')) renderPlanteo();
-  else renderComparativo();
+  // Si cambia ant o sit en comparativo → recalcular categorías en cascada
+  if (msId === 'ms-ant' || msId === 'ms-sit') {
+    updateCmpCategorias();
+    renderComparativo();
+  } else if (msId.startsWith('ms-plt')) {
+    renderPlanteo();
+  } else {
+    renderComparativo();
+  }
 }
 function buildMs(msId, btnId, items, placeholder) {
   const ms = document.getElementById(msId);
@@ -1135,14 +1172,42 @@ function updateCmpFiltros() {
     document.getElementById('ms-sit').innerHTML = '';
     document.getElementById('ms-sit-btn').textContent = 'Todas';
   }
-  // Poblar filtro Categoría en comparativo
-  const cats = [...new Set(RECORDS.filter(r=>r['E/I'].toLowerCase()==='egreso'&&r.Tipo.toLowerCase()!=='grano').map(r=>r.Categoria))].sort();
+  updateCmpCategorias();
+  renderComparativo();
+}
+function updateCmpCategorias() {
+  // Categorías disponibles según cultivo + antecesores + situaciones actualmente seleccionados
+  const cultivo = document.getElementById('cmp-cultivo').value;
+  if (!cultivo || !OPTIONS[cultivo]) return;
+  const activs = OPTIONS[cultivo].activs;
+  const allAnts = OPTIONS[cultivo].antecesores;
+  const allSits = getSituacionesDisplay(cultivo);
+  const selAnts = getMsSelected('ms-ant');
+  const selSits = getMsSelected('ms-sit');
+  const activeAnts = selAnts.length > 0 ? selAnts : allAnts;
+  const activeSits = selSits.length > 0 ? selSits : allSits;
+
+  // Filtrar registros según cultivo + antecesores + situaciones activos
+  const recs = RECORDS.filter(r =>
+    activs.includes(r.Activ) && r['E/I'] === 'Egreso' && r.Tipo !== 'Grano' &&
+    activeAnts.some(a => antMatches(r.Antecesor, a)) &&
+    activeSits.some(s => sitMatches(r.Situacion, s))
+  );
+  const cats = [...new Set(recs.map(r => r.Categoria))].sort();
+
   const msCmpCat = document.getElementById('ms-cmp-cat');
-  if (msCmpCat) {
-    msCmpCat.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-cmp-cat-all" onchange="toggleMsAll('ms-cmp-cat','ms-cmp-cat-btn','ms-cmp-cat-all','Todas')"> <em>Todas</em></label>`
-      + cats.map(c => `<label class="ms-item"><input type="checkbox" value="${c}" onchange="refreshMsBtn('ms-cmp-cat','ms-cmp-cat-btn')">${c}</label>`).join('');
-    document.getElementById('ms-cmp-cat-btn').textContent = `Todas (${cats.length})`;
-  }
+  if (!msCmpCat) return;
+  // Preservar selección previa
+  const prevSel = getMsSelected('ms-cmp-cat');
+  msCmpCat.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-cmp-cat-all" onchange="toggleMsAll('ms-cmp-cat','ms-cmp-cat-btn','ms-cmp-cat-all','Todas')"> <em>Todas</em></label>`
+    + cats.map(c => {
+        const checked = prevSel.length === 0 || prevSel.includes(c) ? '' : '';
+        return `<label class="ms-item"><input type="checkbox" value="${c}" onchange="onCmpCatChange()">${c}</label>`;
+      }).join('');
+  document.getElementById('ms-cmp-cat-btn').textContent = `Todas (${cats.length})`;
+}
+function onCmpCatChange() {
+  refreshMsBtn('ms-cmp-cat', 'ms-cmp-cat-btn');
   renderComparativo();
 }
 function renderComparativo() {
@@ -1224,12 +1289,39 @@ function renderComparativo() {
   }
 
   const nCols = 3 + cols.length;
-  let html = `<p style="margin-bottom:10px;color:#666;font-size:12px">${rows.length} ítems · ${cols.length} situaciones comparadas</p>
-  <div class="pivot-table-sticky"><table class="tbl-prod">
-    <thead><tr>
-      <th>Producto / Labor</th><th>Tipo</th><th>Unidad</th>
-      ${cols.map(s=>`<th>${s}</th>`).join('')}
-    </tr></thead><tbody>`;
+  // Anchos fijos: Producto 35%, Tipo 12%, Unidad 9%, resto repartido igual entre columnas de datos
+  const fixedTotal = 35 + 12 + 9; // = 56%
+  const dataPct = (44 / Math.max(cols.length, 1)).toFixed(2);
+  const colgroup = `<colgroup>
+    <col style="width:35%">
+    <col style="width:12%">
+    <col style="width:9%">
+    ${cols.map(() => `<col style="width:${dataPct}%">`).join('')}
+  </colgroup>`;
+
+  // Header sticky: tabla separada, posicionada sticky debajo del filtro
+  // Body: tabla con overflow-x scroll pero con mismos anchos de columna
+  let html = `<p style="margin-bottom:6px;color:#666;font-size:12px">${rows.length} ítems · ${cols.length} ${cmpPivot === 'sit' ? 'situaciones' : 'antecesores'} comparados</p>`;
+
+  // ── Encabezado sticky (fuera del overflow-x) ──
+  html += `<div class="cmp-thead-sticky" id="cmp-thead-sticky">
+    <table class="tbl-prod" style="table-layout:fixed;margin-bottom:0;border-radius:6px 6px 0 0;box-shadow:none">
+      ${colgroup}
+      <thead><tr>
+        <th style="text-align:left;border-radius:6px 0 0 0">Producto / Labor</th>
+        <th>Tipo</th>
+        <th>Unidad</th>
+        ${cols.map((s,i) => `<th style="text-align:right${i===cols.length-1?';border-radius:0 6px 0 0':''}">${s}</th>`).join('')}
+      </tr></thead>
+    </table>
+  </div>`;
+
+  // ── Cuerpo con scroll horizontal ──
+  html += `<div class="cmp-body-scroll" id="cmp-body-scroll">
+    <table class="tbl-prod" style="table-layout:fixed;border-radius:0 0 6px 6px">
+      ${colgroup}
+      <tbody>`;
+
   for (const sk of sectionOrder) {
     const sec = sectionMap[sk];
     html += `<tr style="background:var(--verde-bg)">
@@ -1242,12 +1334,22 @@ function renderComparativo() {
         <td><strong>${r.prod}</strong></td>
         <td>${tipoBadge(r.tipo)}</td>
         <td>${r.unidad}</td>
-        ${cols.map(s => r.bySit[s] != null ? `<td><strong>${fmtNumAuto(r.bySit[s])}</strong></td>` : `<td style="color:#bbb">—</td>`).join('')}
+        ${cols.map(s => r.bySit[s] != null ? `<td style="text-align:right"><strong>${fmtNumAuto(r.bySit[s])}</strong></td>` : `<td style="color:#bbb;text-align:right">—</td>`).join('')}
       </tr>`;
     }
   }
   html += `</tbody></table></div>`;
   wrap.innerHTML = html;
+
+  // Sincronizar scroll horizontal del body con el header
+  const bodyScroll = document.getElementById('cmp-body-scroll');
+  const headSticky = document.getElementById('cmp-thead-sticky');
+  if (bodyScroll && headSticky) {
+    bodyScroll.addEventListener('scroll', () => {
+      headSticky.scrollLeft = bodyScroll.scrollLeft;
+    });
+  }
+  setTimeout(updateStickyTop, 30);
 }
 
 // ============================================================
@@ -1891,6 +1993,33 @@ function renderTimeline() {
   wrap.innerHTML = html;
 }
 
+// ============================================================
+//  STICKY TOP: calcula la altura del filtro para el thead
+// ============================================================
+function updateStickyTop() {
+  const activeTab = document.querySelector('.tab-content.active');
+  if (!activeTab) return;
+  const wrap = activeTab.querySelector('.filters-sticky-wrap');
+  const h = wrap ? Math.round(wrap.getBoundingClientRect().height) : 0;
+  // Setear en el tab y en :root para que todos los selectores lo vean
+  activeTab.style.setProperty('--sticky-top', h + 'px');
+  document.documentElement.style.setProperty('--sticky-top', h + 'px');
+}
+// Recalcular cuando se renderiza comparativo o planteo
+const _origRenderComparativo = renderComparativo;
+renderComparativo = function() { _origRenderComparativo.apply(this, arguments); setTimeout(updateStickyTop, 30); };
+const _origRenderPlanteo = renderPlanteo;
+renderPlanteo = function() { _origRenderPlanteo.apply(this, arguments); setTimeout(updateStickyTop, 30); };
+// Recalcular si el filtro cambia de tamaño (flex wrap)
+if (window.ResizeObserver) {
+  const _stickyObs = new ResizeObserver(() => updateStickyTop());
+  document.querySelectorAll('.filters-sticky-wrap').forEach(el => _stickyObs.observe(el));
+}
+// Llamar al cambio de tab
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => setTimeout(updateStickyTop, 80));
+});
+
 // init: cargar datos guardados en cache
 const _cacheLoaded = loadFromCache();
 renderSuperficies();
@@ -1900,6 +2029,9 @@ populateInsTipos();
 if (_cacheLoaded) {
   showCacheStatus('📂 Datos restaurados del cache', '#a5d6a7');
 }
+// Calcular sticky top inicial y cada vez que la ventana cambie de tamaño
+setTimeout(updateStickyTop, 100);
+window.addEventListener('resize', updateStickyTop);
 // close multiselect on click outside
 document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) document.querySelectorAll('.ms-dropdown').forEach(d=>d.classList.remove('open')); });
 </script>
