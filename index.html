@@ -656,7 +656,7 @@ function showTabByName(name) {
   else if (name === 'insumos') { populateInsTipos(); renderInsumos(); }
   else if (name === 'mensual') renderMensual();
   else if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
-  else if (name === 'costo') { updateCiFiltros(); renderCosto(); }
+  else if (name === 'costo') { initCiDefaults(); }
   else if (name === 'margen') { initMbFiltros(); renderMargen(); }
 }
 
@@ -825,7 +825,7 @@ function showTab(name) {
   if (name === 'mensual') renderMensual();
   if (name === 'precios') renderPrecios();
   if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
-  if (name === 'costo') { updateCiFiltros(); renderCosto(); }
+  if (name === 'costo') { initCiDefaults(); }
   if (name === 'margen') { initMbFiltros(); renderMargen(); }
 }
 
@@ -2253,12 +2253,12 @@ document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) doc
 <!-- TAB: COSTO DE IMPLANTACIÓN -->
 <div id="tab-costo" class="tab-content" style="padding:0">
   <div class="filters-sticky-wrap">
-  <div class="section-title" style="margin:0 0 10px">Costo de Implantación por Tipo</div>
+  <div class="section-title" style="margin:0 0 10px">Costo de Implantación por Planteo</div>
   <div class="filters" style="align-items:flex-end;margin-bottom:0;border:none;box-shadow:none;background:transparent">
     <div class="form-group">
       <label>Cultivo</label>
       <select id="ci-cultivo" onchange="updateCiFiltros()">
-        <option value="">-- seleccionar --</option>
+        <option value="">-- todos --</option>
         <option>Trigo</option><option>Cebada</option><option>Soja</option>
         <option>Maiz</option><option>Girasol</option><option>Maiz tardio</option>
       </select>
@@ -2333,6 +2333,31 @@ function setCiPivot(v) {
   renderCosto();
 }
 
+function initCiDefaults() {
+  // Called once when tab opens - sets default state if not yet initialised
+  // Default: no cultivo filter (all cultivos shown), Soja pre-selected as antecesor
+  updateCiFiltros();
+  // Pre-check "Soja" in the global antecesor ms (only when no cultivo is selected)
+  setTimeout(() => {
+    const sel = document.getElementById('ci-cultivo').value;
+    if (!sel) {
+      // Pre-check Soja en antecesor y Base en situación
+      let changed = false;
+      document.querySelectorAll('#ms-ci-ant input[type=checkbox]').forEach(cb => {
+        if (cb.value.toLowerCase() === 'soja') { cb.checked = true; changed = true; }
+      });
+      if (changed) refreshMsBtn('ms-ci-ant', 'ms-ci-ant-btn');
+
+      let changedSit = false;
+      document.querySelectorAll('#ms-ci-sit input[type=checkbox]').forEach(cb => {
+        if (cb.value.toLowerCase() === 'base') { cb.checked = true; changedSit = true; }
+      });
+      if (changedSit) refreshMsBtn('ms-ci-sit', 'ms-ci-sit-btn');
+
+      if (changed || changedSit) renderCosto();
+    }
+  }, 50);
+}
 function updateCiFiltros() {
   const cultivo = document.getElementById('ci-cultivo').value;
   // Reset ms dropdowns
@@ -2343,6 +2368,19 @@ function updateCiFiltros() {
   document.getElementById('ms-ci-ant-btn').textContent = 'Todos';
   document.getElementById('ms-ci-sit-btn').textContent = 'Todas';
 
+  if (!cultivo) {
+    // No cultivo: mostrar todos los antecesores y situaciones de todos los cultivos
+    const allAnts = [...new Set(Object.values(OPTIONS).flatMap(o => o.antecesores))].sort();
+    const allSits = [...new Set(Object.values(OPTIONS).flatMap(o => getSituacionesDisplay(Object.keys(OPTIONS).find(k=>OPTIONS[k]===o)||'')))].filter(Boolean).sort();
+    msAnt.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-ci-ant-all" onchange="toggleMsAll('ms-ci-ant','ms-ci-ant-btn','ms-ci-ant-all','Todos')"> <em>Todos</em></label>`
+      + allAnts.map(a => `<label class="ms-item"><input type="checkbox" value="${a}" onchange="refreshMsBtn('ms-ci-ant','ms-ci-ant-btn');renderCosto()">${a}</label>`).join('');
+    document.getElementById('ms-ci-ant-btn').textContent = `Todos (${allAnts.length})`;
+    const allSitsFlat = [...new Set(Object.entries(OPTIONS).flatMap(([c,o]) => getSituacionesDisplay(c)))].sort();
+    msSit.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-ci-sit-all" onchange="toggleMsAll('ms-ci-sit','ms-ci-sit-btn','ms-ci-sit-all','Todas')"> <em>Todas</em></label>`
+      + allSitsFlat.map(s => `<label class="ms-item"><input type="checkbox" value="${s}" onchange="refreshMsBtn('ms-ci-sit','ms-ci-sit-btn');renderCosto()">${s}</label>`).join('');
+    document.getElementById('ms-ci-sit-btn').textContent = `Todas (${allSitsFlat.length})`;
+  }
+
   if (cultivo && OPTIONS[cultivo]) {
     const ants = OPTIONS[cultivo].antecesores;
     const sits = getSituacionesDisplay(cultivo);
@@ -2352,6 +2390,8 @@ function updateCiFiltros() {
     msSit.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-ci-sit-all" onchange="toggleMsAll('ms-ci-sit','ms-ci-sit-btn','ms-ci-sit-all','Todas')"> <em>Todas</em></label>`
       + sits.map(s => `<label class="ms-item"><input type="checkbox" value="${s}" onchange="refreshMsBtn('ms-ci-sit','ms-ci-sit-btn');renderCosto()">${s}</label>`).join('');
     document.getElementById('ms-ci-sit-btn').textContent = `Todas (${sits.length})`;
+  } else {
+    // Sin cultivo seleccionado: no hay filtros de ant/sit
   }
 
   // Tipo multiselect
@@ -2367,18 +2407,83 @@ function updateCiFiltros() {
 function renderCosto() {
   const cultivo = document.getElementById('ci-cultivo').value;
   const wrap = document.getElementById('costo-content');
-
-  if (!cultivo) {
-    wrap.innerHTML = '<p class="empty">Seleccioná un cultivo para ver el costo de implantación.</p>';
-    return;
-  }
-
-  const activs = OPTIONS[cultivo].activs;
-  const allAnts = OPTIONS[cultivo].antecesores;
-  const allSits = getSituacionesDisplay(cultivo);
   const selAnts = getMsSelected('ms-ci-ant');
   const selSits = getMsSelected('ms-ci-sit');
   const selTipos = getMsSelected('ms-ci-tipo');
+
+  const CULTIVOS_ALL = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio'];
+
+  if (!cultivo) {
+    // Sin cultivo: columnas = cultivos, filtrar por ant/sit seleccionados
+    const colData = {};
+    const allTipos = new Set();
+    const cols = CULTIVOS_ALL;
+
+    for (const cv of cols) {
+      colData[cv] = {};
+      const activs = OPTIONS[cv]?.activs || [];
+      const allAnts = OPTIONS[cv]?.antecesores || [];
+      const allSits = getSituacionesDisplay(cv);
+      const activeAnts = selAnts.length > 0 ? selAnts.filter(a => allAnts.includes(a)) : allAnts;
+      const activeSits = selSits.length > 0 ? selSits.filter(s => allSits.includes(s)) : allSits;
+      if (!activeAnts.length || !activeSits.length) continue;
+
+      let recs = RECORDS.filter(r =>
+        activs.includes(normActiv(r.Activ)) &&
+        r['E/I'] === 'Egreso' &&
+        r.Tipo !== 'Grano' &&
+        activeAnts.some(a => antMatches(r.Antecesor, a)) &&
+        activeSits.some(s => sitMatches(r.Situacion, s))
+      );
+      if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
+
+      for (const r of recs) {
+        const precio = getPrecio(r['Produc/labor'], r.Unidad);
+        if (precio === null) continue;
+        if (!colData[cv][r.Tipo]) colData[cv][r.Tipo] = 0;
+        colData[cv][r.Tipo] += precio * r.Dosis;
+        allTipos.add(r.Tipo);
+      }
+    }
+
+    const tipoOrder = ['Coadyuvante','Fertilizante','Fungicida','Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra','Cosecha'];
+    let tipos = tipoOrder.filter(t => allTipos.has(t));
+    if (selTipos.length > 0) tipos = tipoOrder.filter(t => selTipos.includes(t) && allTipos.has(t));
+
+    if (!tipos.length) { wrap.innerHTML = '<p class="empty">Sin datos para los filtros seleccionados.</p>'; return; }
+
+    const dataPct = (80 / Math.max(cols.length, 1)).toFixed(2);
+    const colgroup = `<colgroup><col style="width:20%">${cols.map(() => `<col style="width:${dataPct}%">`).join('')}</colgroup>`;
+    const filterInfo = [];
+    if (selAnts.length > 0) filterInfo.push(`Ant: ${selAnts.join(', ')}`);
+    if (selSits.length > 0) filterInfo.push(`Sit: ${selSits.join(', ')}`);
+    let html = `<p style="margin-bottom:8px;color:#666;font-size:12px">${tipos.length} tipos · todos los cultivos${filterInfo.length ? ' · ' + filterInfo.join(' · ') : ''} &nbsp;·&nbsp; <em style="color:#999">Valores en u$s/ha</em></p>`;
+    html += `<div class="table-scroll-wrap"><table class="tbl-prod" style="table-layout:fixed">${colgroup}<thead><tr>
+      <th style="text-align:left;border-radius:6px 0 0 0">Tipo</th>
+      ${cols.map((c,i) => `<th style="text-align:right${i===cols.length-1?';border-radius:0 6px 0 0':''}"><span class="badge badge-${({Trigo:'trigo',Cebada:'cebada',Soja:'soja',Maiz:'maiz',Girasol:'girasol','Maiz tardio':'tardio'})[c]||'tipo'}">${c}</span></th>`).join('')}
+    </tr></thead><tbody>`;
+    const totals = {};
+    for (const tipo of tipos) {
+      html += `<tr><td>${tipoBadge(tipo)}</td>`;
+      for (const cv of cols) {
+        const v = colData[cv][tipo];
+        html += v != null && v > 0 ? `<td style="text-align:right" class="costo-cell">u$s ${fmtNum(v,2)}</td>` : `<td style="text-align:right;color:#ccc">—</td>`;
+        if (!totals[cv]) totals[cv] = 0;
+        totals[cv] += v || 0;
+      }
+      html += `</tr>`;
+    }
+    html += `<tr class="total-row"><td><strong>TOTAL u$s/ha</strong></td>`;
+    for (const cv of cols) html += `<td style="text-align:right"><strong>u$s ${fmtNum(totals[cv]||0,2)}</strong></td>`;
+    html += `</tr></tbody></table></div>`;
+    wrap.innerHTML = html;
+    return;
+  }
+
+  // Con cultivo seleccionado: comportamiento original con pivot sit/ant
+  const activs = OPTIONS[cultivo].activs;
+  const allAnts = OPTIONS[cultivo].antecesores;
+  const allSits = getSituacionesDisplay(cultivo);
 
   // Columnas según pivot
   let cols;
@@ -2388,8 +2493,6 @@ function renderCosto() {
     cols = selAnts.length > 0 ? selAnts : allAnts;
   }
 
-  // Para cada columna, obtener registros filtrados y calcular costo por tipo
-  // Los registros de costo son egreso + no-grano
   const activeAnts = selAnts.length > 0 ? selAnts : allAnts;
   const activeSits = selSits.length > 0 ? selSits : allSits;
 
@@ -2399,11 +2502,9 @@ function renderCosto() {
 
   for (const col of cols) {
     colData[col] = {};
-    // Determinar antecesor(es) y situacion(es) a usar para esta columna
     const filterAnts = ciPivot === 'sit' ? activeAnts : [col];
     const filterSits = ciPivot === 'sit' ? [col] : activeSits;
 
-    // Filtrar registros
     let recs = RECORDS.filter(r =>
       activs.includes(normActiv(r.Activ)) &&
       r['E/I'] === 'Egreso' &&
@@ -2414,7 +2515,6 @@ function renderCosto() {
 
     if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
 
-    // Costo por tipo (u$s/ha = precio × dosis)
     for (const r of recs) {
       const precio = getPrecio(r['Produc/labor'], r.Unidad);
       if (precio === null) continue;
