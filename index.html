@@ -132,11 +132,15 @@ tr:hover td { background: var(--verde-bg); }
 .pivot-table table { min-width: 600px; }
 .pivot-table th.col-sit { writing-mode: horizontal-tb; font-size: 10px; max-width: 120px; white-space: normal; }
 @media print {
-  header, .tabs, .filters, .add-superficie-form, .btn, .view-toggle, .ms-wrap { display: none !important; }
-  .tab-content { display: block !important; padding: 0; }
-  #tab-superficies, #tab-comparativo, #tab-planteo { display: none !important; }
+  header, .tabs, .filters, .add-superficie-form, .btn, .view-toggle, .ms-wrap, .filters-sticky-wrap { display: none !important; }
   body { background: white; }
   table { font-size: 11px; }
+  /* Default: hide all tab content */
+  .tab-content { display: none !important; }
+  /* When printing insumos: only show insumos tab */
+  body.print-insumos #tab-insumos { display: block !important; padding: 0; }
+  /* When printing mensual: only show mensual tab */
+  body.print-mensual #tab-mensual { display: block !important; padding: 0; }
 }
 
 /* Dosis editable */
@@ -274,6 +278,8 @@ tr:hover td { background: var(--verde-bg); }
   <button class="tab-btn" onclick="showTab('mensual')">📅 Resumen Mensual</button>
   <button class="tab-btn" onclick="showTab('precios')">💲 Precios</button>
   <button class="tab-btn" onclick="showTab('timeline')">📆 Línea de Tiempo</button>
+  <button class="tab-btn" onclick="showTab('costo')">🌱 Costo Implantación</button>
+  <button class="tab-btn" onclick="showTab('margen')">📈 Margen Bruto</button>
 </div>
 
 <!-- TAB 1: SUPERFICIES -->
@@ -469,7 +475,7 @@ tr:hover td { background: var(--verde-bg); }
       <label>Fecha hasta</label>
       <input type="date" id="ins-hasta" onchange="renderInsumos()">
     </div>
-    <button class="btn btn-export btn-sm" onclick="exportXLSX('insumos')">⬇ XLSX</button> <button class="btn btn-export btn-sm" style="background:#8b1a1a" onclick="exportPDF()">⬇ PDF</button>
+    <button class="btn btn-export btn-sm" onclick="exportXLSX('insumos')">⬇ XLSX</button> <button class="btn btn-export btn-sm" style="background:#8b1a1a" onclick="exportPDF('insumos')">⬇ PDF</button>
   </div>
   <div id="insumos-content"></div>
 </div>
@@ -507,7 +513,7 @@ tr:hover td { background: var(--verde-bg); }
       <label>Fecha hasta</label>
       <input type="date" id="men-hasta" onchange="renderMensual()">
     </div>
-    <button class="btn btn-export btn-sm" onclick="exportXLSX('mensual')">⬇ XLSX</button> <button class="btn btn-export btn-sm" style="background:#8b1a1a" onclick="exportPDF()">⬇ PDF</button>
+    <button class="btn btn-export btn-sm" onclick="exportXLSX('mensual')">⬇ XLSX</button> <button class="btn btn-export btn-sm" style="background:#8b1a1a" onclick="exportPDF('mensual')">⬇ PDF</button>
   </div>
   <div id="mensual-content"></div>
 </div>
@@ -650,6 +656,8 @@ function showTabByName(name) {
   else if (name === 'insumos') { populateInsTipos(); renderInsumos(); }
   else if (name === 'mensual') renderMensual();
   else if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
+  else if (name === 'costo') { updateCiFiltros(); renderCosto(); }
+  else if (name === 'margen') { initMbFiltros(); renderMargen(); }
 }
 
 // Cargar datos desde Google Sheets al arrancar
@@ -817,6 +825,8 @@ function showTab(name) {
   if (name === 'mensual') renderMensual();
   if (name === 'precios') renderPrecios();
   if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
+  if (name === 'costo') { updateCiFiltros(); renderCosto(); }
+  if (name === 'margen') { initMbFiltros(); renderMargen(); }
 }
 
 // ============================================================
@@ -1247,6 +1257,10 @@ function toggleMsAll(msId, btnId, allChkId, label) {
     renderComparativo();
   } else if (msId.startsWith('ms-plt')) {
     renderPlanteo();
+  } else if (msId.startsWith('ms-ci')) {
+    renderCosto();
+  } else if (msId.startsWith('ms-mb')) {
+    renderMargen();
   } else {
     renderComparativo();
   }
@@ -1545,11 +1559,10 @@ function renderInsumos() {
     html += `<td>${prec !== null ? 'u$s '+fmtNumAuto(prec) : '<span class="costo-na">—</span>'}</td>`;
     html += `<td>${fmtCosto(costo)}</td></tr>`;
   }
-  // total row
+  // total row — columnas de cantidad no se suman (diferentes unidades), solo se muestra costo total u$s
   html += `<tr class="total-row"><td colspan="3"><strong>TOTAL</strong></td>`;
-  let gt = 0;
-  for (const cv of cultivos) { html += `<td><strong>${fmtNumAuto(totals[cv]||0)}</strong></td>`; gt += totals[cv]||0; }
-  html += `<td><strong>${fmtNumAuto(gt)}</strong></td><td></td><td>${fmtCosto(totalCostoIns)}</td></tr>`;
+  for (const cv of cultivos) { html += `<td style="color:#aaa;font-size:11px">—</td>`; }
+  html += `<td style="color:#aaa;font-size:11px">—</td><td></td><td>${fmtCosto(totalCostoIns)}</td></tr>`;
   html += `</tbody></table>`;
   wrap.innerHTML = html;
 }
@@ -1641,26 +1654,37 @@ function exportXLSX(tipo) {
   let data = [];
   if (tipo === 'insumos') {
     const cultivos = [...new Set(superficies.map(s=>s.cultivo))];
-    data.push(['Producto/Labor','Tipo','Unidad',...cultivos,'TOTAL']);
+    // Header: cols por cultivo + total cantidad + u$s/unidad + costo total u$s
+    data.push(['Producto/Labor','Tipo','Unidad',...cultivos,'Total Unidades','u$s/unidad','Costo Total u$s']);
+    let grandTotalUsd = 0;
     for (const r of _lastInsumos) {
-      data.push([r.prod, r.tipo, r.unidad, ...cultivos.map(c=>r.byCultivo[c]||0), r.total]);
+      const prec = getPrecio(r.prod, r.unidad);
+      const costoUsd = prec !== null ? prec * r.total : '';
+      if (prec !== null) grandTotalUsd += costoUsd;
+      data.push([r.prod, r.tipo, r.unidad, ...cultivos.map(c=>r.byCultivo[c]||0), r.total, prec !== null ? prec : '', costoUsd]);
     }
-    data.push(['TOTAL','','', ...cultivos.map(c=>_lastInsumos.reduce((s,r)=>s+(r.byCultivo[c]||0),0)), _lastInsumos.reduce((s,r)=>s+r.total,0)]);
+    // Fila de total: solo costo total u$s (no sumas de cantidades con distintas unidades)
+    data.push(['TOTAL','','', ...cultivos.map(()=>''), '', '', grandTotalUsd]);
   } else {
-    data.push(['Producto/Labor','Tipo','Unidad',..._lastMensualMonths,'TOTAL']);
+    // Mensual: sin fila de totales por columna (distintas unidades)
+    data.push(['Producto/Labor','Tipo','Unidad',..._lastMensualMonths,'Total Unidades']);
     for (const r of _lastMensualRows) {
       data.push([r.prod, r.tipo, r.unidad, ..._lastMensualMonths.map(m=>r.byMes[m]||0), r.total]);
     }
-    const monthTotals = _lastMensualMonths.map(m=>_lastMensualRows.reduce((s,r)=>s+(r.byMes[m]||0),0));
-    data.push(['TOTAL','','',...monthTotals, _lastMensualRows.reduce((s,r)=>s+r.total,0)]);
+    // Sin fila de totales (no tiene sentido sumar distintas unidades)
   }
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(data);
+  // Formato numérico para columnas de costo
   XLSX.utils.book_append_sheet(wb, ws, tipo==='insumos'?'Insumos':'Mensual');
   XLSX.writeFile(wb, `SOS-2627-${tipo}.xlsx`);
 }
-function exportPDF() {
+function exportPDF(tabName) {
+  // Add print class to body to control which tab shows
+  document.body.classList.add('print-' + tabName);
   window.print();
+  // Remove class after printing dialog closes
+  setTimeout(() => document.body.classList.remove('print-' + tabName), 1000);
 }
 
 
@@ -2225,5 +2249,384 @@ document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) doc
     <div id="tl-popup-body"></div>
   </div>
 </div>
+
+<!-- TAB: COSTO DE IMPLANTACIÓN -->
+<div id="tab-costo" class="tab-content" style="padding:0">
+  <div class="filters-sticky-wrap">
+  <div class="section-title" style="margin:0 0 10px">Costo de Implantación por Tipo</div>
+  <div class="filters" style="align-items:flex-end;margin-bottom:0;border:none;box-shadow:none;background:transparent">
+    <div class="form-group">
+      <label>Cultivo</label>
+      <select id="ci-cultivo" onchange="updateCiFiltros()">
+        <option value="">-- seleccionar --</option>
+        <option>Trigo</option><option>Cebada</option><option>Soja</option>
+        <option>Maiz</option><option>Girasol</option><option>Maiz tardio</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Antecesores</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-ci-ant')" type="button" id="ms-ci-ant-btn">Todos</button>
+        <div class="ms-dropdown" id="ms-ci-ant"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Situaciones</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-ci-sit')" type="button" id="ms-ci-sit-btn">Todas</button>
+        <div class="ms-dropdown" id="ms-ci-sit"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Tipo</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-ci-tipo')" type="button" id="ms-ci-tipo-btn">Todos</button>
+        <div class="ms-dropdown" id="ms-ci-tipo"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Columnas por</label>
+      <div class="pivot-toggle">
+        <button class="pivot-btn active" id="ci-pvt-sit" onclick="setCiPivot('sit')">Situación</button>
+        <button class="pivot-btn" id="ci-pvt-ant" onclick="setCiPivot('ant')">Antecesor</button>
+      </div>
+    </div>
+  </div>
+  </div>
+  <div id="costo-content" style="padding:14px"></div>
+</div>
+
+<!-- TAB: MARGEN BRUTO -->
+<div id="tab-margen" class="tab-content" style="padding:0">
+  <div class="filters-sticky-wrap">
+  <div class="section-title" style="margin:0 0 10px">Margen Bruto por Cultivo</div>
+  <div class="filters" style="align-items:flex-end;margin-bottom:0;border:none;box-shadow:none;background:transparent">
+    <div class="form-group">
+      <label>Antecesores</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-mb-ant')" type="button" id="ms-mb-ant-btn">Todos</button>
+        <div class="ms-dropdown" id="ms-mb-ant"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Situaciones</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-mb-sit')" type="button" id="ms-mb-sit-btn">Todas</button>
+        <div class="ms-dropdown" id="ms-mb-sit"></div>
+      </div>
+    </div>
+  </div>
+  </div>
+  <div id="margen-content" style="padding:14px"></div>
+</div>
+
+<script>
+// ============================================================
+//  TAB: COSTO DE IMPLANTACIÓN
+// ============================================================
+let ciPivot = 'sit';
+
+function setCiPivot(v) {
+  ciPivot = v;
+  document.getElementById('ci-pvt-sit').classList.toggle('active', v === 'sit');
+  document.getElementById('ci-pvt-ant').classList.toggle('active', v === 'ant');
+  renderCosto();
+}
+
+function updateCiFiltros() {
+  const cultivo = document.getElementById('ci-cultivo').value;
+  // Reset ms dropdowns
+  const msAnt = document.getElementById('ms-ci-ant');
+  const msSit = document.getElementById('ms-ci-sit');
+  msAnt.innerHTML = '';
+  msSit.innerHTML = '';
+  document.getElementById('ms-ci-ant-btn').textContent = 'Todos';
+  document.getElementById('ms-ci-sit-btn').textContent = 'Todas';
+
+  if (cultivo && OPTIONS[cultivo]) {
+    const ants = OPTIONS[cultivo].antecesores;
+    const sits = getSituacionesDisplay(cultivo);
+    msAnt.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-ci-ant-all" onchange="toggleMsAll('ms-ci-ant','ms-ci-ant-btn','ms-ci-ant-all','Todos')"> <em>Todos</em></label>`
+      + ants.map(a => `<label class="ms-item"><input type="checkbox" value="${a}" onchange="refreshMsBtn('ms-ci-ant','ms-ci-ant-btn');renderCosto()">${a}</label>`).join('');
+    document.getElementById('ms-ci-ant-btn').textContent = `Todos (${ants.length})`;
+    msSit.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-ci-sit-all" onchange="toggleMsAll('ms-ci-sit','ms-ci-sit-btn','ms-ci-sit-all','Todas')"> <em>Todas</em></label>`
+      + sits.map(s => `<label class="ms-item"><input type="checkbox" value="${s}" onchange="refreshMsBtn('ms-ci-sit','ms-ci-sit-btn');renderCosto()">${s}</label>`).join('');
+    document.getElementById('ms-ci-sit-btn').textContent = `Todas (${sits.length})`;
+  }
+
+  // Tipo multiselect
+  const tipos = ['Coadyuvante','Fertilizante','Fungicida','Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra','Cosecha'];
+  const msTipo = document.getElementById('ms-ci-tipo');
+  msTipo.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-ci-tipo-all" onchange="toggleMsAll('ms-ci-tipo','ms-ci-tipo-btn','ms-ci-tipo-all','Todos')"> <em>Todos</em></label>`
+    + tipos.map(t => `<label class="ms-item"><input type="checkbox" value="${t}" onchange="refreshMsBtn('ms-ci-tipo','ms-ci-tipo-btn');renderCosto()">${t}</label>`).join('');
+  document.getElementById('ms-ci-tipo-btn').textContent = `Todos (${tipos.length})`;
+
+  renderCosto();
+}
+
+function renderCosto() {
+  const cultivo = document.getElementById('ci-cultivo').value;
+  const wrap = document.getElementById('costo-content');
+
+  if (!cultivo) {
+    wrap.innerHTML = '<p class="empty">Seleccioná un cultivo para ver el costo de implantación.</p>';
+    return;
+  }
+
+  const activs = OPTIONS[cultivo].activs;
+  const allAnts = OPTIONS[cultivo].antecesores;
+  const allSits = getSituacionesDisplay(cultivo);
+  const selAnts = getMsSelected('ms-ci-ant');
+  const selSits = getMsSelected('ms-ci-sit');
+  const selTipos = getMsSelected('ms-ci-tipo');
+
+  // Columnas según pivot
+  let cols;
+  if (ciPivot === 'sit') {
+    cols = selSits.length > 0 ? selSits : allSits;
+  } else {
+    cols = selAnts.length > 0 ? selAnts : allAnts;
+  }
+
+  // Para cada columna, obtener registros filtrados y calcular costo por tipo
+  // Los registros de costo son egreso + no-grano
+  const activeAnts = selAnts.length > 0 ? selAnts : allAnts;
+  const activeSits = selSits.length > 0 ? selSits : allSits;
+
+  // Construir mapa: col -> tipo -> costoTotal/ha
+  const colData = {}; // col -> tipo -> usd_ha
+  const allTipos = new Set();
+
+  for (const col of cols) {
+    colData[col] = {};
+    // Determinar antecesor(es) y situacion(es) a usar para esta columna
+    const filterAnts = ciPivot === 'sit' ? activeAnts : [col];
+    const filterSits = ciPivot === 'sit' ? [col] : activeSits;
+
+    // Filtrar registros
+    let recs = RECORDS.filter(r =>
+      activs.includes(normActiv(r.Activ)) &&
+      r['E/I'] === 'Egreso' &&
+      r.Tipo !== 'Grano' &&
+      filterAnts.some(a => antMatches(r.Antecesor, a)) &&
+      filterSits.some(s => sitMatches(r.Situacion, s))
+    );
+
+    if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
+
+    // Costo por tipo (u$s/ha = precio × dosis)
+    for (const r of recs) {
+      const precio = getPrecio(r['Produc/labor'], r.Unidad);
+      if (precio === null) continue;
+      const costoHa = precio * r.Dosis;
+      if (!colData[col][r.Tipo]) colData[col][r.Tipo] = 0;
+      colData[col][r.Tipo] += costoHa;
+      allTipos.add(r.Tipo);
+    }
+  }
+
+  if (cols.length === 0) { wrap.innerHTML = '<p class="empty">Sin columnas para mostrar.</p>'; return; }
+
+  const tipoOrder = ['Coadyuvante','Fertilizante','Fungicida','Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra','Cosecha'];
+  const tipos = tipoOrder.filter(t => allTipos.has(t));
+  if (selTipos.length > 0) tipos.splice(0, tipos.length, ...tipoOrder.filter(t => selTipos.includes(t) && allTipos.has(t)));
+
+  if (!tipos.length) { wrap.innerHTML = '<p class="empty">Sin datos de costo para los filtros seleccionados.</p>'; return; }
+
+  const dataPct = (80 / Math.max(cols.length, 1)).toFixed(2);
+  const colgroup = `<colgroup><col style="width:20%">${cols.map(() => `<col style="width:${dataPct}%">`).join('')}</colgroup>`;
+
+  let html = `<div class="table-scroll-wrap">
+  <table class="tbl-prod" style="table-layout:fixed">
+    ${colgroup}
+    <thead><tr>
+      <th style="text-align:left;border-radius:6px 0 0 0">Tipo</th>
+      ${cols.map((c, i) => `<th style="text-align:right${i===cols.length-1?';border-radius:0 6px 0 0':''}">${c}</th>`).join('')}
+    </tr></thead>
+    <tbody>`;
+
+  const totals = {};
+  for (const tipo of tipos) {
+    html += `<tr><td>${tipoBadge(tipo)}</td>`;
+    for (const col of cols) {
+      const v = colData[col][tipo];
+      html += v != null && v > 0 ? `<td style="text-align:right" class="costo-cell">u$s ${fmtNum(v,2)}</td>` : `<td style="text-align:right;color:#ccc">—</td>`;
+      if (!totals[col]) totals[col] = 0;
+      totals[col] += v || 0;
+    }
+    html += `</tr>`;
+  }
+
+  // Fila de totales
+  html += `<tr class="total-row"><td><strong>TOTAL u$s/ha</strong></td>`;
+  for (const col of cols) {
+    const t = totals[col] || 0;
+    html += `<td style="text-align:right"><strong>u$s ${fmtNum(t,2)}</strong></td>`;
+  }
+  html += `</tr></tbody></table></div>`;
+
+  const label = ciPivot === 'sit' ? 'situación' : 'antecesor';
+  html = `<p style="margin-bottom:8px;color:#666;font-size:12px">${tipos.length} tipos · ${cols.length} ${label === 'situación' ? 'situaciones' : 'antecesores'} comparados &nbsp;·&nbsp; <em style="color:#999">Valores en u$s/ha</em></p>` + html;
+
+  wrap.innerHTML = html;
+}
+
+// ============================================================
+//  TAB: MARGEN BRUTO
+// ============================================================
+
+function initMbFiltros() {
+  // Populate antecesores y situaciones a partir de todas las superficies definidas
+  const allAnts = [...new Set(RECORDS.filter(r=>r.Antecesor.toLowerCase()!=='todos').flatMap(r=>r.Antecesor.split(/\s+o\s+|,\s*|\s+y\s+/).map(s=>s.trim()).filter(Boolean)))].sort();
+  const allSits = [...new Set(RECORDS.filter(r=>r.Situacion.toLowerCase()!=='todas').flatMap(r=>r.Situacion.split(/\s+o\s+|,\s*|\s+y\s+/).map(s=>s.trim()).filter(Boolean)))].sort();
+
+  const msAnt = document.getElementById('ms-mb-ant');
+  msAnt.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-mb-ant-all" onchange="toggleMsAll('ms-mb-ant','ms-mb-ant-btn','ms-mb-ant-all','Todos')"> <em>Todos</em></label>`
+    + allAnts.map(a => `<label class="ms-item"><input type="checkbox" value="${a}" onchange="refreshMsBtn('ms-mb-ant','ms-mb-ant-btn');renderMargen()">${a}</label>`).join('');
+  document.getElementById('ms-mb-ant-btn').textContent = `Todos (${allAnts.length})`;
+
+  const msSit = document.getElementById('ms-mb-sit');
+  msSit.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-mb-sit-all" onchange="toggleMsAll('ms-mb-sit','ms-mb-sit-btn','ms-mb-sit-all','Todas')"> <em>Todas</em></label>`
+    + allSits.map(s => `<label class="ms-item"><input type="checkbox" value="${s}" onchange="refreshMsBtn('ms-mb-sit','ms-mb-sit-btn');renderMargen()">${s}</label>`).join('');
+  document.getElementById('ms-mb-sit-btn').textContent = `Todas (${allSits.length})`;
+}
+
+function renderMargen() {
+  const wrap = document.getElementById('margen-content');
+  const selAnts = getMsSelected('ms-mb-ant');
+  const selSits = getMsSelected('ms-mb-sit');
+
+  const CULTIVOS = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio'];
+
+  // Calcular para cada cultivo: ingreso_ha, costo_ha, margen_ha
+  // Filtro: si hay ant/sit seleccionados, solo incluir registros que matcheen
+  // Primero chequear cuales cultivos tienen superficies definidas
+  const cultivosConSup = [...new Set(superficies.map(s=>s.cultivo))];
+
+  // Para el margen, necesitamos la superficie sembrada (filtrada)
+  // La superficie sembrada filtrada = sum de ha de superficies que matcheen ant/sit filtros
+  function haFiltrada(cultivo) {
+    let sups = superficies.filter(s => s.cultivo === cultivo);
+    if (selAnts.length > 0) sups = sups.filter(s => selAnts.includes(s.antecesor));
+    if (selSits.length > 0) sups = sups.filter(s => selSits.includes(s.situacion));
+    return sups.reduce((sum, s) => sum + s.ha, 0);
+  }
+
+  // Para calcular dólares totales (no /ha) necesitamos filtrar por superficie
+  // Ingreso: Tipo === 'Grano', E/I === 'Ingreso'
+  // Costo: E/I === 'Egreso', Tipo !== 'Grano'
+  function calcCultivoMargen(cultivo) {
+    const activs = OPTIONS[cultivo]?.activs || [];
+    if (!activs.length) return null;
+
+    // Obtener superficies filtradas
+    let sups = superficies.filter(s => s.cultivo === cultivo);
+    if (selAnts.length > 0) sups = sups.filter(s => selAnts.includes(s.antecesor));
+    if (selSits.length > 0) sups = sups.filter(s => selSits.includes(s.situacion));
+
+    const totalHa = sups.reduce((sum, s) => sum + s.ha, 0);
+    if (totalHa === 0) return null; // sin superficie
+
+    let ingresoTotal = 0, costoTotal = 0;
+    let nSinPrecioIngreso = 0, nSinPrecioCosto = 0;
+
+    for (const sup of sups) {
+      // Ingresos: registros de grano con E/I=Ingreso
+      const ingRecs = RECORDS.filter(r =>
+        activs.includes(normActiv(r.Activ)) &&
+        r['E/I'] === 'Ingreso' &&
+        r.Tipo === 'Grano' &&
+        antMatches(r.Antecesor, sup.antecesor) &&
+        sitMatches(r.Situacion, sup.situacion)
+      );
+      for (const r of ingRecs) {
+        const p = getPrecio(r['Produc/labor'], r.Unidad);
+        if (p !== null) ingresoTotal += p * r.Dosis * sup.ha;
+        else nSinPrecioIngreso++;
+      }
+
+      // Costos: egreso + no grano
+      const costoRecs = filterRecords(sup.cultivo, sup.antecesor, sup.situacion);
+      for (const r of costoRecs) {
+        const p = getPrecio(r['Produc/labor'], r.Unidad);
+        if (p !== null) costoTotal += p * r.Dosis * sup.ha;
+        else nSinPrecioCosto++;
+      }
+    }
+
+    const ingresoHa = totalHa > 0 ? ingresoTotal / totalHa : 0;
+    const costoHa = totalHa > 0 ? costoTotal / totalHa : 0;
+    const margenHa = ingresoHa - costoHa;
+
+    return { cultivo, totalHa, ingresoTotal, costoTotal, ingresoHa, costoHa, margenHa, nSinPrecioIngreso, nSinPrecioCosto };
+  }
+
+  const rows = CULTIVOS.map(c => calcCultivoMargen(c)).filter(Boolean);
+
+  if (!rows.length) {
+    if (!superficies.length) {
+      wrap.innerHTML = '<div class="no-superficies">⚠️ Primero definí las superficies en la pestaña "Superficies".</div>';
+    } else {
+      wrap.innerHTML = '<p class="empty">Sin superficies para los filtros seleccionados.</p>';
+    }
+    return;
+  }
+
+  const filtroInfo = [];
+  if (selAnts.length > 0) filtroInfo.push(`Ant: ${selAnts.join(', ')}`);
+  if (selSits.length > 0) filtroInfo.push(`Sit: ${selSits.join(', ')}`);
+
+  let html = `<p style="margin-bottom:10px;color:#666;font-size:12px">${rows.length} cultivo(s) con superficie definida${filtroInfo.length ? ' · ' + filtroInfo.join(' · ') : ''} &nbsp;·&nbsp; <em style="color:#999">Valores en u$s/ha (total u$s ÷ superficie filtrada)</em></p>`;
+
+  html += `<div class="table-scroll-wrap"><table class="tbl-prod" style="table-layout:fixed;min-width:700px">
+  <colgroup>
+    <col style="width:18%"><col style="width:12%">
+    <col style="width:17%"><col style="width:17%"><col style="width:17%">
+    <col style="width:10%"><col style="width:9%">
+  </colgroup>
+  <thead><tr>
+    <th style="text-align:left;border-radius:6px 0 0 0">Cultivo</th>
+    <th style="text-align:right">Ha (filtradas)</th>
+    <th style="text-align:right">Ingreso u$s/ha</th>
+    <th style="text-align:right">Costo u$s/ha</th>
+    <th style="text-align:right;border-radius:0 6px 0 0">Margen Bruto u$s/ha</th>
+  </tr></thead>
+  <tbody>`;
+
+  for (const r of rows) {
+    const margenColor = r.margenHa >= 0 ? '#1a5c2a' : '#c0392b';
+    const margenBg = r.margenHa >= 0 ? '#f0f9f0' : '#fdf0f0';
+    html += `<tr>
+      <td style="text-align:left">${cultivoBadge(r.cultivo)}</td>
+      <td style="text-align:right">${fmtNum(r.totalHa,1)} ha</td>
+      <td style="text-align:right;color:#0a7;font-weight:600">${r.ingresoHa > 0 ? 'u$s ' + fmtNum(r.ingresoHa,2) : '<span style="color:#ccc">—</span>'}</td>
+      <td style="text-align:right;color:#c0392b;font-weight:600">u$s ${fmtNum(r.costoHa,2)}</td>
+      <td style="text-align:right;font-weight:700;color:${margenColor};background:${margenBg}">u$s ${fmtNum(r.margenHa,2)}</td>
+    </tr>`;
+    if (r.nSinPrecioIngreso > 0 || r.nSinPrecioCosto > 0) {
+      html += `<tr><td colspan="5" style="text-align:right;font-size:10px;color:#aaa;padding:2px 10px">
+        ${r.nSinPrecioIngreso > 0 ? r.nSinPrecioIngreso + ' ítem(s) de ingreso sin precio' : ''}
+        ${r.nSinPrecioIngreso > 0 && r.nSinPrecioCosto > 0 ? ' · ' : ''}
+        ${r.nSinPrecioCosto > 0 ? r.nSinPrecioCosto + ' ítem(s) de costo sin precio' : ''}
+      </td></tr>`;
+    }
+  }
+
+  html += `</tbody></table></div>`;
+
+  // Advertencia si hay items sin precio de grano
+  const hayGranoSinPrecio = rows.some(r => r.nSinPrecioIngreso > 0);
+  if (hayGranoSinPrecio) {
+    html += `<div style="margin-top:10px;background:#fff8e8;border:1px solid #e6a817;border-radius:4px;padding:8px 12px;font-size:12px;color:#7a5800">
+      ⚠️ Algunos cultivos tienen ítems de ingreso (precio de grano) sin precio configurado. Configurá los precios de grano en la pestaña <strong>💲 Precios</strong>.
+    </div>`;
+  }
+
+  wrap.innerHTML = html;
+}
+
+// Inicializar filtros de margen al cargar
+setTimeout(() => { initMbFiltros(); }, 200);
+</script>
 </body>
 </html>
