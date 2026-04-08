@@ -787,10 +787,16 @@ function csvToSupRows(csvText) {
     const row = {};
     headers.forEach((h, idx) => row[h] = (vals[idx]||'').trim().replace(/^"|"$/g,''));
     if (!row['empresa'] || !row['cultivo']) continue;
+    // Normalizar cultivo al nombre exacto de OPTIONS (tolerante a mayúsculas/minúsculas y tildes)
+    const cultivoRaw = row['cultivo'].trim();
+    const cultivoNorm = Object.keys(OPTIONS).find(
+      k => k.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'') ===
+           cultivoRaw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    ) || cultivoRaw;
     rows.push({
       empresa:     row['empresa'],
       responsable: row['responsable'] || '',
-      cultivo:     row['cultivo'],
+      cultivo:     cultivoNorm,
       antecesor:   row['antecesor'] || '',
       situacion:   row['situacion'] || '',
       ha:          parseFloat(String(row['superficie']||row['ha']||'0').replace(',','.')) || 0
@@ -1106,6 +1112,7 @@ function getSituacionesDisplay(cultivo) {
   return hasBase ? sits : ['Base', ...sits];
 }
 function filterRecords(cultivo, antecesor, situacion) {
+  if (!OPTIONS[cultivo]) return []; // cultivo no reconocido
   const activs = OPTIONS[cultivo].activs;
   return RECORDS.filter(r =>
     activs.includes(normActiv(r.Activ)) &&
