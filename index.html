@@ -341,7 +341,7 @@ tr:hover td { background: var(--verde-bg); }
 <div class="tabs">
   <button class="tab-btn active" onclick="showTab('superficies')">📐 Superficies</button>
   <button class="tab-btn" onclick="showTab('planteo')">📋 Resumen Planteo</button>
-  <button class="tab-btn" onclick="showTab('comparativo')">🔍 Comparativo</button>
+  <button class="tab-btn" id="tab-btn-comparativo" onclick="showTab('comparativo')">🔍 Comparativo</button>
   <button class="tab-btn" onclick="showTab('porha')">📊 Insumos/ha</button>
   <button class="tab-btn" onclick="showTab('insumos')">📦 Resumen Insumos</button>
   <button class="tab-btn" onclick="showTab('mensual')">📅 Resumen Mensual</button>
@@ -476,8 +476,14 @@ tr:hover td { background: var(--verde-bg); }
   <div class="section-title">Insumos y Labores por Ha Sembrada</div>
   <div class="filters" style="align-items:flex-end">
     <div class="form-group">
+      <label>Cultivo</label>
+      <select id="porha-cultivo" onchange="updatePorhaFiltros()">
+        <option value="">Todos</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label>Antecesor</label>
-      <select id="porha-antecesor" onchange="updatePorhaFiltros()">
+      <select id="porha-antecesor" onchange="updatePorhaAntecesorFiltro()">
         <option value=""></option>
       </select>
     </div>
@@ -707,7 +713,7 @@ async function loadFromGSheets() {
 function showTabByName(name) {
   if (name === 'planteo') renderPlanteo();
   else if (name === 'comparativo') { updateCmpFiltros(); renderComparativo(); }
-  else if (name === 'porha') { updatePorhaFiltros(); renderPorha(); }
+  else if (name === 'porha') { initPorhaAnts(); updatePorhaFiltros(); renderPorha(); }
   else if (name === 'insumos') { populateInsTipos(); renderInsumos(); }
   else if (name === 'mensual') renderMensual();
   else if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
@@ -989,6 +995,10 @@ function _showApp(empresa, admin) {
     el.style.color = '#2d6a2d';
   }
 
+  // Comparativo: solo visible para admin
+  const btnCmp = document.getElementById('tab-btn-comparativo');
+  if (btnCmp) btnCmp.style.display = admin ? '' : 'none';
+
   // Activar tab superficies visualmente
   document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', i===0));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -1148,7 +1158,7 @@ function showTab(name) {
   document.getElementById(`tab-${name}`).classList.add('active');
   if (name === 'planteo') renderPlanteo();
   if (name === 'comparativo') { updateCmpFiltros(); renderComparativo(); }
-  if (name === 'porha') { updatePorhaFiltros(); renderPorha(); }
+  if (name === 'porha') { initPorhaAnts(); updatePorhaFiltros(); renderPorha(); }
   if (name === 'insumos') { populateInsTipos(); renderInsumos(); }
   if (name === 'mensual') renderMensual();
   if (name === 'precios') renderPrecios();
@@ -2175,19 +2185,44 @@ function renderPrecios() {
 //  TAB: INSUMOS POR HA
 // ============================================================
 function updatePorhaFiltros() {
-  const ant = document.getElementById('porha-antecesor').value;
+  // Cultivo seleccionado → poblar antecesores disponibles en las superficies
+  const fCultivo = document.getElementById('porha-cultivo').value;
+  const selAnt = document.getElementById('porha-antecesor');
   const selSit = document.getElementById('porha-situacion');
+
+  // Antecesores: de las superficies que matchean el cultivo seleccionado
+  const ants = [...new Set(
+    superficies
+      .filter(s => !fCultivo || s.cultivo === fCultivo)
+      .map(s => s.antecesor)
+      .filter(Boolean)
+  )].sort();
+
+  selAnt.innerHTML = '<option value=""></option>';
+  for (const a of ants) selAnt.innerHTML += `<option value="${a}">${U(a)}</option>`;
+
+  // Reset situacion
   selSit.innerHTML = '<option value=""></option>';
 
-  // Determinar situaciones disponibles según el antecesor seleccionado
-  // Buscamos todos los cultivos que tengan ese antecesor y juntamos sus situaciones
-  const allSits = new Set();
-  for (const [cultivo, opts] of Object.entries(OPTIONS)) {
-    if (!ant || opts.antecesores.some(a => a.toLowerCase() === ant.toLowerCase())) {
-      for (const s of getSituacionesDisplay(cultivo)) allSits.add(s);
-    }
-  }
-  for (const s of [...allSits].sort()) selSit.innerHTML += `<option>${s}</option>`;
+  renderPorha();
+}
+
+function updatePorhaAntecesorFiltro() {
+  // Antecesor seleccionado → poblar situaciones de las superficies que matchean cultivo+antecesor
+  const fCultivo  = document.getElementById('porha-cultivo').value;
+  const fAnt      = document.getElementById('porha-antecesor').value;
+  const selSit    = document.getElementById('porha-situacion');
+
+  const sits = [...new Set(
+    superficies
+      .filter(s => (!fCultivo || s.cultivo === fCultivo) && (!fAnt || s.antecesor.toLowerCase() === fAnt.toLowerCase()))
+      .map(s => s.situacion)
+      .filter(Boolean)
+  )].sort();
+
+  selSit.innerHTML = '<option value=""></option>';
+  for (const s of sits) selSit.innerHTML += `<option value="${s}">${U(s)}</option>`;
+
   renderPorha();
 }
 
@@ -2199,12 +2234,14 @@ function renderPorha() {
     return;
   }
 
-  const fAnt = document.getElementById('porha-antecesor').value;
-  const fSit = document.getElementById('porha-situacion').value;
+  const fCultivo = document.getElementById('porha-cultivo').value;
+  const fAnt  = document.getElementById('porha-antecesor').value;
+  const fSit  = document.getElementById('porha-situacion').value;
   const fTipo = document.getElementById('porha-tipo').value;
 
-  // Cultivos presentes en las superficies cargadas
-  const cultivos = [...new Set(superficies.map(s => s.cultivo))];
+  // Cultivos a mostrar: los de las superficies, filtrados por selección
+  const cultivos = [...new Set(superficies.map(s => s.cultivo))]
+    .filter(c => !fCultivo || c === fCultivo);
 
   // Para cada cultivo calcular las ha que matchean el filtro ant/sit
   const haPorCultivo = {};
@@ -2327,14 +2364,15 @@ function renderPorha() {
 
 // Inicializar filtros de porha al cargar (sin cultivo seleccionado todavía)
 function initPorhaAnts() {
-  const selAnt = document.getElementById('porha-antecesor');
-  if (!selAnt) return;
-  const allAnts = new Set();
-  for (const opts of Object.values(OPTIONS)) {
-    for (const a of opts.antecesores) allAnts.add(a);
-  }
-  selAnt.innerHTML = '<option value=""></option>';
-  for (const a of [...allAnts].sort()) selAnt.innerHTML += `<option value="${a}">${U(a)}</option>`;
+  // Poblar cultivos desde las superficies cargadas
+  const selCul = document.getElementById('porha-cultivo');
+  if (!selCul) return;
+  const cultivos = [...new Set(superficies.map(s => s.cultivo))].sort();
+  selCul.innerHTML = '<option value="">Todos</option>';
+  for (const c of cultivos) selCul.innerHTML += `<option value="${c}">${U(c)}</option>`;
+  // Reset antecesor y situacion
+  document.getElementById('porha-antecesor').innerHTML = '<option value=""></option>';
+  document.getElementById('porha-situacion').innerHTML = '<option value=""></option>';
 }
 
 // ============================================================
