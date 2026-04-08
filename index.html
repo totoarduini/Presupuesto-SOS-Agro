@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Presupuesto SOS Agro 26-27</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
   --verde: #2d6a2d;
@@ -42,7 +43,9 @@ header span { font-size: 12px; opacity: .7; }
 .btn-danger { background: #c0392b; color: white; padding: 3px 8px; font-size: 11px; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-export { background: #2c6e49; color: white; }
-table { width: 100%; border-collapse: collapse; background: white; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+table { width: 100%; border-collapse: collapse; background: white; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+/* overflow:hidden en table rompe position:sticky del thead — se usa clip en su lugar */
+.tbl-sticky { overflow: clip; }
 th { background: var(--verde); color: white; padding: 7px 10px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; white-space: nowrap; }
 td { padding: 6px 10px; border-bottom: 1px solid var(--gris-borde); vertical-align: middle; text-align: center; }
 tr:last-child td { border-bottom: none; }
@@ -57,8 +60,6 @@ tr:hover td { background: var(--verde-bg); }
 .badge-maiz { background: #f8d7da; color: #721c24; }
 .badge-girasol { background: #fff8db; color: #856404; }
 .badge-tardio { background: #e2d9f3; color: #432874; }
-.badge-maiz2da { background: #fce8e8; color: #7a1c1c; }
-.badge-soja2da { background: #cce8f4; color: #0a4060; }
 .badge-tipo { background: #e8e8e8; color: #444; }
 .badge-herbicida { background: #fde8e8; color: #8b1a1a; }
 .badge-fertilizante { background: #e8f4e8; color: #1a5c1a; }
@@ -94,6 +95,11 @@ tr:hover td { background: var(--verde-bg); }
 .td-left { text-align: left !important; }
 .tbl-prod th:first-child, .tbl-prod td:first-child { text-align: left; }
 .tbl-prod th:nth-child(2), .tbl-prod td:nth-child(2) { text-align: center; }
+.tbl-prod th:nth-child(3), .tbl-prod td:nth-child(3) { text-align: center; }
+.tbl-prod th:nth-child(4), .tbl-prod td:nth-child(4) { text-align: center; }
+.tbl-prod th:nth-child(5), .tbl-prod td:nth-child(5) { text-align: right; }
+.tbl-prod th:nth-child(6), .tbl-prod td:nth-child(6) { text-align: right; }
+.tbl-prod th:nth-child(7), .tbl-prod td:nth-child(7) { text-align: right; }
 .tag-lote { background: #eef; border: 1px solid #bbd; border-radius: 3px; padding: 1px 5px; font-size: 11px; color: #335; margin-right: 3px; margin-bottom: 2px; display: inline-block; }
 /* resumen planteo */
 .planteo-section { margin-bottom: 16px; }
@@ -122,16 +128,19 @@ tr:hover td { background: var(--verde-bg); }
 .pivot-btn:first-of-type { border-radius: 4px 0 0 4px; }
 .pivot-btn:last-of-type { border-radius: 0 4px 4px 0; }
 .pivot-btn.active { background: var(--verde); color: white; border-color: var(--verde); font-weight: 600; }
-.pivot-table { overflow: auto; max-height: calc(100vh - 220px); }
+.pivot-table { overflow-x: auto; }
 .pivot-table table { min-width: 600px; }
 .pivot-table th.col-sit { writing-mode: horizontal-tb; font-size: 10px; max-width: 120px; white-space: normal; }
-.pivot-table thead th { position: sticky; top: 0; z-index: 5; }
 @media print {
-  header, .tabs, .filters, .add-superficie-form, .btn, .view-toggle, .ms-wrap { display: none !important; }
-  .tab-content { display: block !important; padding: 0; }
-  #tab-superficies, #tab-comparativo, #tab-planteo { display: none !important; }
+  header, .tabs, .filters, .add-superficie-form, .btn, .view-toggle, .ms-wrap, .filters-sticky-wrap { display: none !important; }
   body { background: white; }
   table { font-size: 11px; }
+  /* Default: hide all tab content */
+  .tab-content { display: none !important; }
+  /* When printing insumos: only show insumos tab */
+  body.print-insumos #tab-insumos { display: block !important; padding: 0; }
+  /* When printing mensual: only show mensual tab */
+  body.print-mensual #tab-mensual { display: block !important; padding: 0; }
 }
 
 /* Dosis editable */
@@ -179,9 +188,124 @@ tr:hover td { background: var(--verde-bg); }
 .precio-input.modified { background: #fff8e8; border-color: #e6a817; }
 
 .sync-status { font-size: 11px; }
+
+/* Sticky filters + table headers */
+.filters-sticky-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #eef2ee;
+  padding: 14px 14px 8px;
+  border-bottom: 2px solid var(--verde-borde);
+  box-shadow: 0 3px 8px rgba(0,0,0,.08);
+}
+.table-scroll-wrap { overflow-x: auto; }
+
+/* Planteo: encabezado sticky separado igual que comparativo */
+.plt-thead-sticky {
+  position: sticky;
+  top: var(--sticky-top, 0px);
+  z-index: 20;
+  overflow: hidden;
+}
+.plt-thead-sticky table {
+  margin-bottom: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,.15) !important;
+}
+.plt-body table {
+  border-radius: 0 0 6px 6px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.07) !important;
+}
+/* Comparativo: encabezado sticky separado del body scrollable */
+.cmp-thead-sticky {
+  position: sticky;
+  top: var(--sticky-top, 0px);
+  z-index: 20;
+  overflow-x: scroll;          /* permite que scrollLeft funcione por JS */
+  overflow-y: hidden;
+  scrollbar-width: none;       /* Firefox: oculta scrollbar visualmente */
+  -ms-overflow-style: none;    /* IE/Edge */
+  border-radius: 6px 6px 0 0;
+}
+.cmp-thead-sticky::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+.cmp-thead-sticky table {
+  margin-bottom: 0 !important;
+  border-bottom: none !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,.15) !important;
+}
+.cmp-body-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  border-radius: 0 0 6px 6px;
+}
+.cmp-body-scroll table {
+  border-radius: 0 0 6px 6px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.07) !important;
+}
+
+
+
+/* Fila de sub-header de secciones (fecha/categoria) también queda bajo el encabezado */
+.section-subheader-sticky {
+  position: sticky;
+  left: 0;
+}
+
+
+/* ── LOGIN ───────────────────────────────────────────────────── */
+#login-overlay {
+  position:fixed; inset:0; z-index:9999;
+  background:linear-gradient(150deg,#1e4d1e 0%,#2d6a2d 60%,#1a5c2a 100%);
+  display:flex; align-items:center; justify-content:center;
+}
+.login-box {
+  background:white; border-radius:10px; padding:38px 42px;
+  width:360px; box-shadow:0 8px 40px rgba(0,0,0,.3);
+}
+.login-logo { font-size:32px; text-align:center; margin-bottom:6px; }
+.login-box h2 { color:var(--acento); font-size:17px; font-weight:700; text-align:center; margin-bottom:2px; }
+.login-sub  { color:#999; font-size:12px; text-align:center; margin-bottom:26px; }
+.login-field { margin-bottom:14px; }
+.login-field label { display:block; font-size:11px; font-weight:700; color:#555; text-transform:uppercase; letter-spacing:.3px; margin-bottom:4px; }
+.login-field input { width:100%; padding:9px 12px; border:1px solid var(--gris-borde); border-radius:5px; font-size:14px; box-sizing:border-box; }
+.login-field input:focus { outline:none; border-color:var(--verde-claro); box-shadow:0 0 0 2px rgba(74,154,74,.15); }
+#login-btn { width:100%; padding:11px; background:var(--verde); color:white; border:none; border-radius:5px; font-size:14px; font-weight:700; cursor:pointer; margin-top:6px; }
+#login-btn:hover { background:var(--verde-claro); }
+#login-btn:disabled { opacity:.6; cursor:default; }
+#login-error { color:#c0392b; font-size:12px; margin-top:10px; text-align:center; min-height:18px; }
+.empresa-badge { background:rgba(255,255,255,.18); color:white; padding:3px 11px; border-radius:12px; font-size:12px; font-weight:700; letter-spacing:.3px; }
+.admin-badge   { background:#e6a817; color:#333; padding:3px 11px; border-radius:12px; font-size:12px; font-weight:700; }
+.btn-logout { padding:4px 11px; border-radius:4px; border:1px solid rgba(255,255,255,.35); cursor:pointer; font-size:12px; font-weight:600; background:rgba(255,255,255,.10); color:white; }
+.btn-logout:hover { background:rgba(255,255,255,.22); }
+#admin-empresa-wrap label { font-size:11px; color:rgba(255,255,255,.7); font-weight:700; text-transform:uppercase; }
+#admin-empresa-sel { padding:4px 8px; border-radius:4px; border:1px solid rgba(255,255,255,.3); font-size:12px; font-weight:600; background:rgba(255,255,255,.12); color:white; cursor:pointer; }
+#admin-empresa-sel option { background:#1e4d1e; color:white; }
 </style>
 </head>
 <body>
+<!-- ── LOGIN OVERLAY ─────────────────────────────────────────── -->
+<div id="login-overlay">
+  <div class="login-box">
+    <div class="login-logo">🌾</div>
+    <h2>Presupuesto SOS Agro</h2>
+    <div class="login-sub">Campaña 26-27</div>
+    <div class="login-field">
+      <label>Empresa</label>
+      <input type="text" id="login-empresa" placeholder="Nombre de empresa"
+        autocapitalize="off" autocorrect="off" autocomplete="off"
+        onkeydown="if(event.key==='Enter')document.getElementById('login-pass').focus()">
+    </div>
+    <div class="login-field">
+      <label>Contraseña</label>
+      <input type="password" id="login-pass" placeholder="••••••••"
+        onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button id="login-btn" onclick="doLogin()">Ingresar</button>
+    <div id="login-error"></div>
+  </div>
+</div>
+
 
 <header>
   <div>
@@ -190,9 +314,27 @@ tr:hover td { background: var(--verde-bg); }
   <span id="resumen-header"></span>
   <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
     <span id="sync-status" style="font-size:11px;opacity:.8"></span>
+    <span id="cache-status" style="font-size:11px;opacity:.9"></span>
+    <button onclick="clearCache()"
+      style="padding:4px 11px;border-radius:4px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:rgba(255,255,255,.12);color:white"
+      title="Borrar datos guardados en caché">🗑️ Borrar cache</button>
     <button onclick="loadFromGSheets()" id="sync-btn"
       style="padding:4px 11px;border-radius:4px;border:none;cursor:pointer;font-size:12px;font-weight:600;background:rgba(255,255,255,.18);color:white"
       title="Actualizar datos desde Google Sheets">🔄 Actualizar</button>
+  </div>
+  <!-- Admin empresa filter -->
+  <div id="admin-empresa-wrap" style="display:none;align-items:center;gap:6px;margin-left:8px">
+    <label>EMPRESA:</label>
+    <select id="admin-empresa-sel" onchange="setAdminEmpresaFilter(this.value)">
+      <option value="">Todas</option>
+    </select>
+  </div>
+  <!-- Empresa badge + logout -->
+  <div style="display:flex;align-items:center;gap:8px;margin-left:10px">
+    <span id="empresa-badge-wrap" style="display:none">
+      <span id="empresa-badge" class="empresa-badge"></span>
+    </span>
+    <button class="btn-logout" id="logout-btn" style="display:none" onclick="doLogout()">↩ Salir</button>
   </div>
 </header>
 
@@ -205,54 +347,42 @@ tr:hover td { background: var(--verde-bg); }
   <button class="tab-btn" onclick="showTab('mensual')">📅 Resumen Mensual</button>
   <button class="tab-btn" onclick="showTab('precios')">💲 Precios</button>
   <button class="tab-btn" onclick="showTab('timeline')">📆 Línea de Tiempo</button>
+  <button class="tab-btn" onclick="showTab('costo')">🌱 Costo Implantación</button>
+  <button class="tab-btn" onclick="showTab('margen')">📈 Margen Bruto</button>
 </div>
 
 <!-- TAB 1: SUPERFICIES -->
 <div id="tab-superficies" class="tab-content active">
-  <div class="section-title">Definición de Superficies por Cultivo × Antecesor × Situación</div>
-  <div class="add-superficie-form">
-    <div class="form-group">
-      <label>Cultivo</label>
-      <select id="sel-cultivo" onchange="updateAntecesores()">
-        <option value="">-- Seleccionar --</option>
-        <option>Trigo</option><option>Cebada</option><option>Soja</option>
-        <option>Maiz</option><option>Girasol</option><option>Maiz tardio</option><option>Maiz 2da</option><option>Soja 2da</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Antecesor</label>
-      <select id="sel-antecesor" onchange="updateSituaciones()">
-        <option value="">-- primero cultivo --</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Situación</label>
-      <select id="sel-situacion">
-        <option value="">-- primero antecesor --</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Hectáreas</label>
-      <input type="number" id="inp-ha" min="0" step="0.1" placeholder="0" style="width:90px">
-    </div>
-    <button class="btn btn-primary" onclick="addSuperficie()">+ Agregar</button>
+  <div class="section-title">Superficies por Empresa — Campaña 26-27</div>
+  <div id="sup-sync-bar" style="background:white;border:1px solid var(--verde-borde);border-radius:6px;padding:8px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span id="sup-sync-status" style="font-size:12px;color:#666;flex:1">📊 Superficies desde Google Sheets</span>
+    <button class="btn btn-sm" style="background:var(--verde);color:white" onclick="refreshSuperficies()">🔄 Actualizar superficies</button>
   </div>
 
   <div id="tabla-superficies-wrap"></div>
 
-  <div class="cards" id="resumen-cards" style="margin-top:14px"></div>
+  <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:14px;align-items:flex-start">
+    <div class="cards" id="resumen-cards" style="flex:1;min-width:200px"></div>
+    <div id="pie-chart-wrap" style="display:none;background:white;border:1px solid var(--verde-borde);border-radius:6px;padding:12px;width:260px;flex-shrink:0">
+      <div style="font-size:12px;font-weight:700;color:var(--acento);margin-bottom:8px">% de superficie por cultivo</div>
+      <canvas id="pie-chart" width="236" height="236"></canvas>
+    </div>
+  </div>
 </div>
 
 <!-- TAB 2: RESUMEN PLANTEO TÉCNICO -->
-<div id="tab-planteo" class="tab-content">
-  <div class="section-title">Resumen del Planteo Técnico por Cultivo</div>
-  <div class="filters" style="align-items:flex-end">
+<div id="tab-planteo" class="tab-content" style="padding:0">
+  <div class="filters-sticky-wrap">
+  <div class="section-title" style="margin:0 0 10px">Resumen del Planteo Técnico por Cultivo</div>
+  <div class="filters" style="align-items:flex-end;margin-bottom:0;border:none;box-shadow:none;background:transparent">
     <div class="form-group">
       <label>Cultivo</label>
       <select id="plt-cultivo" onchange="updatePltFiltros()">
         <option value="">Todos</option>
-        <option>Trigo</option><option>Cebada</option><option>Soja</option>
-        <option>Maiz</option><option>Girasol</option><option>Maiz tardio</option><option>Maiz 2da</option><option>Soja 2da</option>
+        <option value="Trigo">TRIGO</option><option value="Cebada">CEBADA</option>
+        <option value="Soja">SOJA</option><option value="Maiz">MAÍZ</option>
+        <option value="Girasol">GIRASOL</option><option value="Maiz tardio">MAÍZ TARDÍO</option>
+        <option value="Maiz 2da">MAÍZ 2DA</option><option value="Soja 2da">SOJA 2DA</option>
       </select>
     </div>
     <div class="form-group">
@@ -274,20 +404,31 @@ tr:hover td { background: var(--verde-bg); }
         <div class="ms-dropdown" id="ms-plt-tipo"></div>
       </div>
     </div>
+    <div class="form-group">
+      <label>Categoría</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-plt-cat')" type="button" id="ms-plt-cat-btn">Todas</button>
+        <div class="ms-dropdown" id="ms-plt-cat"></div>
+      </div>
+    </div>
   </div>
-  <div id="planteo-content"></div>
+  </div><!-- /filters-sticky-wrap -->
+  <div id="planteo-content" style="padding:14px"></div>
 </div>
 
 <!-- TAB 3: COMPARATIVO -->
-<div id="tab-comparativo" class="tab-content">
-  <div class="section-title">Comparativo de Planteos Técnicos</div>
-  <div class="filters" style="align-items:flex-end">
+<div id="tab-comparativo" class="tab-content" style="padding:0">
+  <div class="filters-sticky-wrap">
+  <div class="section-title" style="margin:0 0 10px">Comparativo de Planteos Técnicos</div>
+  <div class="filters" style="align-items:flex-end;margin-bottom:0;border:none;box-shadow:none;background:transparent">
     <div class="form-group">
       <label>Cultivo</label>
       <select id="cmp-cultivo" onchange="updateCmpFiltros()">
         <option value="">-- seleccionar --</option>
-        <option>Trigo</option><option>Cebada</option><option>Soja</option>
-        <option>Maiz</option><option>Girasol</option><option>Maiz tardio</option><option>Maiz 2da</option><option>Soja 2da</option>
+        <option value="Trigo">TRIGO</option><option value="Cebada">CEBADA</option>
+        <option value="Soja">SOJA</option><option value="Maiz">MAÍZ</option>
+        <option value="Girasol">GIRASOL</option><option value="Maiz tardio">MAÍZ TARDÍO</option>
+        <option value="Maiz 2da">MAÍZ 2DA</option><option value="Soja 2da">SOJA 2DA</option>
       </select>
     </div>
     <div class="form-group">
@@ -311,6 +452,13 @@ tr:hover td { background: var(--verde-bg); }
       </select>
     </div>
     <div class="form-group">
+      <label>Categoría</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-cmp-cat')" type="button" id="ms-cmp-cat-btn">Todas</button>
+        <div class="ms-dropdown" id="ms-cmp-cat"></div>
+      </div>
+    </div>
+    <div class="form-group">
       <label>Columnas por</label>
       <div class="pivot-toggle">
         <button class="pivot-btn active" id="pvt-sit" onclick="setCmpPivot('sit')">Situación</button>
@@ -318,7 +466,8 @@ tr:hover td { background: var(--verde-bg); }
       </div>
     </div>
   </div>
-  <div id="comparativo-content"></div>
+  </div><!-- /filters-sticky-wrap -->
+  <div id="comparativo-content" style="padding:14px"></div>
 </div>
 
 <!-- TAB 4: RESUMEN INSUMOS -->
@@ -358,8 +507,10 @@ tr:hover td { background: var(--verde-bg); }
       <label>Cultivo</label>
       <select id="ins-cultivo" onchange="renderInsumos()">
         <option value="">Todos</option>
-        <option>Trigo</option><option>Cebada</option><option>Soja</option>
-        <option>Maiz</option><option>Girasol</option><option>Maiz tardio</option><option>Maiz 2da</option><option>Soja 2da</option>
+        <option value="Trigo">TRIGO</option><option value="Cebada">CEBADA</option>
+        <option value="Soja">SOJA</option><option value="Maiz">MAÍZ</option>
+        <option value="Girasol">GIRASOL</option><option value="Maiz tardio">MAÍZ TARDÍO</option>
+        <option value="Maiz 2da">MAÍZ 2DA</option><option value="Soja 2da">SOJA 2DA</option>
       </select>
     </div>
     <div class="form-group">
@@ -376,7 +527,7 @@ tr:hover td { background: var(--verde-bg); }
       <label>Fecha hasta</label>
       <input type="date" id="ins-hasta" onchange="renderInsumos()">
     </div>
-    <button class="btn btn-export btn-sm" onclick="exportXLSX('insumos')">⬇ XLSX</button> <button class="btn btn-export btn-sm" style="background:#8b1a1a" onclick="exportPDF()">⬇ PDF</button>
+    <button class="btn btn-export btn-sm" onclick="exportXLSX('insumos')">⬇ XLSX</button> <button class="btn btn-export btn-sm" style="background:#8b1a1a" onclick="exportPDF('insumos')">⬇ PDF</button>
   </div>
   <div id="insumos-content"></div>
 </div>
@@ -389,8 +540,10 @@ tr:hover td { background: var(--verde-bg); }
       <label>Cultivo</label>
       <select id="men-cultivo" onchange="renderMensual()">
         <option value="">Todos</option>
-        <option>Trigo</option><option>Cebada</option><option>Soja</option>
-        <option>Maiz</option><option>Girasol</option><option>Maiz tardio</option><option>Maiz 2da</option><option>Soja 2da</option>
+        <option value="Trigo">TRIGO</option><option value="Cebada">CEBADA</option>
+        <option value="Soja">SOJA</option><option value="Maiz">MAÍZ</option>
+        <option value="Girasol">GIRASOL</option><option value="Maiz tardio">MAÍZ TARDÍO</option>
+        <option value="Maiz 2da">MAÍZ 2DA</option><option value="Soja 2da">SOJA 2DA</option>
       </select>
     </div>
     <div class="form-group">
@@ -414,7 +567,7 @@ tr:hover td { background: var(--verde-bg); }
       <label>Fecha hasta</label>
       <input type="date" id="men-hasta" onchange="renderMensual()">
     </div>
-    <button class="btn btn-export btn-sm" onclick="exportXLSX('mensual')">⬇ XLSX</button> <button class="btn btn-export btn-sm" style="background:#8b1a1a" onclick="exportPDF()">⬇ PDF</button>
+    <button class="btn btn-export btn-sm" onclick="exportXLSX('mensual')">⬇ XLSX</button> <button class="btn btn-export btn-sm" style="background:#8b1a1a" onclick="exportPDF('mensual')">⬇ PDF</button>
   </div>
   <div id="mensual-content"></div>
 </div>
@@ -558,19 +711,40 @@ function showTabByName(name) {
   else if (name === 'insumos') { populateInsTipos(); renderInsumos(); }
   else if (name === 'mensual') renderMensual();
   else if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
+  else if (name === 'costo') { initCiDefaults(); }
+  else if (name === 'margen') { initMbFiltros(); renderMargen(); }
 }
 
-// Cargar datos desde Google Sheets al arrancar
-window.addEventListener('load', () => {
-  loadFromGSheets();
-});
+// Los datos se cargan desde _showApp() tras el login
 
 // ============================================================
 //  DATA
 // ============================================================
-let OPTIONS = {"Trigo": {"activs": ["Fina", "Trigo"], "antecesores": ["Girasol", "Maiz Silo", "Soja"], "situaciones": ["Base", "nabo", "RG"]}, "Cebada": {"activs": ["Fina", "Cebada"], "antecesores": ["Girasol", "Maiz Silo", "Soja"], "situaciones": ["Base", "nabo", "RG"]}, "Soja": {"activs": ["Soja"], "antecesores": ["Girasol", "Maiz", "Maiz 2da", "Maiz Humedo", "Maiz tardio", "Soja"], "situaciones": ["Base", "Cloris", "Colorado", "Echinocloa", "Eleusine", "Lecheron", "Pata de gallo"]}, "Maiz": {"activs": ["Maiz"], "antecesores": ["Girasol", "Maiz Silo", "Soja", "Soja 2da"], "situaciones": ["Base", "Colorado", "Gramineas", "Nabo", "RG"]}, "Girasol": {"activs": ["Girasol"], "antecesores": ["Maiz", "Maiz 2da", "Maiz tardio", "Soja", "Soja 2da"], "situaciones": ["nabo"]}, "Maiz tardio": {"activs": ["Maiz tardio"], "antecesores": ["Girasol", "Maiz Silo", "Soja", "Soja 2da"], "situaciones": ["Base", "Cloris Enlist", "Cloris No Enlist", "Colorado", "Eleusine", "pata de gallo"]}, "Maiz 2da": {"activs": ["Maiz 2da"], "antecesores": [], "situaciones": []}, "Soja 2da": {"activs": ["Soja 2da"], "antecesores": [], "situaciones": []}};
+let OPTIONS = {"Trigo": {"activs": ["Fina", "Trigo"], "antecesores": ["Girasol", "Maiz Silo", "Soja"], "situaciones": ["Base", "nabo", "RG"]}, "Cebada": {"activs": ["Fina", "Cebada"], "antecesores": ["Girasol", "Maiz Silo", "Soja"], "situaciones": ["Base", "nabo", "RG"]}, "Soja": {"activs": ["Soja"], "antecesores": ["Girasol", "Maiz", "Maiz 2da", "Maiz Humedo", "Maiz tardio", "Soja"], "situaciones": ["Base", "Cloris", "Colorado", "Echinocloa", "Eleusine", "Lecheron", "Pata de gallo"]}, "Maiz": {"activs": ["Maiz"], "antecesores": ["Girasol", "Maiz Silo", "Soja", "Soja 2da"], "situaciones": ["Base", "Colorado", "Gramineas", "Nabo", "RG"]}, "Girasol": {"activs": ["Girasol"], "antecesores": ["Maiz", "Maiz 2da", "Maiz tardio", "Soja", "Soja 2da"], "situaciones": ["nabo"]}, "Maiz tardio": {"activs": ["Maiz tardio"], "antecesores": ["Girasol", "Maiz Silo", "Soja", "Soja 2da"], "situaciones": ["Base", "Cloris Enlist", "Cloris No Enlist", "Colorado", "Eleusine", "pata de gallo"]}};
 
 let RECORDS = [{"Nro Registro": "15", "Fecha": "2026-03-15", "Activ": "Fina", "Antecesor": "Girasol", "Situacion": "todas", "Categoria": "Rolo", "Produc/labor": "rolo picador", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "1", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "Base", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "2", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "Base", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "3", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "Base", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "4", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "Base", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "5", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "Base", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "23", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "nabo", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "24", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "nabo", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "25", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "nabo", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "26", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "nabo", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "27", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "nabo", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "34", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "nabo", "Categoria": "Barbecho", "Produc/labor": "heat", "Dosis": 0.035, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "36", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "37", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "38", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "39", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "40", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "47", "Fecha": "2026-04-01", "Activ": "Fina", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "cletodim 24%", "Dosis": 0.8, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "6", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Pre Siembra", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "7", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Pre Siembra", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "8", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Pre Siembra", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "9", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Pre Siembra", "Produc/labor": "metsulfuron", "Dosis": 0.005, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "10", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Pre Siembra", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "11", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Pre Siembra", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "28", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Pre Siembra", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "29", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Pre Siembra", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "30", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Pre Siembra", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "31", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Pre Siembra", "Produc/labor": "metsulfuron", "Dosis": 0.005, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "32", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Pre Siembra", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "33", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Pre Siembra", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "35", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Pre Siembra", "Produc/labor": "flurocloridona", "Dosis": 1.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "41", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Pre Siembra", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "42", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Pre Siembra", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "43", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Pre Siembra", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "44", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Pre Siembra", "Produc/labor": "metsulfuron", "Dosis": 0.005, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "45", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Pre Siembra", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "46", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Pre Siembra", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "48", "Fecha": "2026-05-20", "Activ": "Fina", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Pre Siembra", "Produc/labor": "yamato", "Dosis": 0.12, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "13", "Fecha": "2026-06-01", "Activ": "Trigo", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "semilla trigo", "Dosis": 120.0, "Tipo": "Semilla", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "21", "Fecha": "2026-06-01", "Activ": "Cebada", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "semilla cebada", "Dosis": 140.0, "Tipo": "Semilla", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "12", "Fecha": "2026-06-01", "Activ": "Fina", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "SDFFERT", "Dosis": 1.0, "Tipo": "Siembra", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "14", "Fecha": "2026-06-01", "Activ": "Fina", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "map", "Dosis": 100.0, "Tipo": "Fertilizante", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "16", "Fecha": "2026-07-01", "Activ": "Fina", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Fertilizacion", "Produc/labor": "fertilizacion", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-07-01", "Activ": "Fina", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Fertilizacion", "Produc/labor": "urea", "Dosis": 140.0, "Tipo": "Fertilizante", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "18", "Fecha": "2026-10-15", "Activ": "Trigo", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Fungicida", "Produc/labor": "amistar extra", "Dosis": 0.4, "Tipo": "Fungicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 4, "Comentarios/Observaciones": ""}, {"Nro Registro": "22", "Fecha": "2026-10-15", "Activ": "Cebada", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Fungicida", "Produc/labor": "elatus ace", "Dosis": 0.6, "Tipo": "Fungicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "17", "Fecha": "2026-10-15", "Activ": "Fina", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Fungicida", "Produc/labor": "pulvA", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "19", "Fecha": "2026-12-05", "Activ": "Cebada", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "cosCe", "Dosis": 1.0, "Tipo": "Cosecha", "Unidad": "pasada", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "20", "Fecha": "2026-12-05", "Activ": "Cebada", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "cebada", "Dosis": 4000.0, "Tipo": "Grano", "Unidad": "kg", "E/I": "Ingreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "49", "Fecha": "2026-05-20", "Activ": "Girasol", "Antecesor": "Soja, Soja 2da, Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "50", "Fecha": "2026-05-20", "Activ": "Girasol", "Antecesor": "Soja, Soja 2da, Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "51", "Fecha": "2026-05-20", "Activ": "Girasol", "Antecesor": "Soja, Soja 2da, Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "52", "Fecha": "2026-05-20", "Activ": "Girasol", "Antecesor": "Soja, Soja 2da, Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "53", "Fecha": "2026-05-20", "Activ": "Girasol", "Antecesor": "Soja, Soja 2da, Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "73", "Fecha": "2026-05-20", "Activ": "Girasol", "Antecesor": "Soja, Soja 2da, Maiz", "Situacion": "nabo", "Categoria": "Barbecho", "Produc/labor": "Liberty", "Dosis": 2.0, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "69", "Fecha": "2026-05-15", "Activ": "Girasol", "Antecesor": "Maiz tardio o Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvA", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "70", "Fecha": "2026-05-15", "Activ": "Girasol", "Antecesor": "Maiz tardio o Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "71", "Fecha": "2026-05-15", "Activ": "Girasol", "Antecesor": "Maiz tardio o Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "72", "Fecha": "2026-05-15", "Activ": "Girasol", "Antecesor": "Maiz tardio o Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "74", "Fecha": "2026-09-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Barbecho corto", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "75", "Fecha": "2026-09-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Barbecho corto", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "76", "Fecha": "2026-09-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Barbecho corto", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "77", "Fecha": "2026-09-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Barbecho corto", "Produc/labor": "flurocloridona", "Dosis": 1.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "78", "Fecha": "2026-09-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Barbecho corto", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "79", "Fecha": "2026-09-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "nabo", "Categoria": "Barbecho corto", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "54", "Fecha": "2026-10-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "55", "Fecha": "2026-10-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "coragen", "Dosis": 0.04, "Tipo": "Insecticida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 4, "Comentarios/Observaciones": ""}, {"Nro Registro": "56", "Fecha": "2026-10-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "57", "Fecha": "2026-10-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "authority", "Dosis": 0.25, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 4, "Comentarios/Observaciones": ""}, {"Nro Registro": "58", "Fecha": "2026-10-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "dual gold", "Dosis": 1.2, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "59", "Fecha": "2026-10-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "60", "Fecha": "2026-10-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "61", "Fecha": "2026-10-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "62", "Fecha": "2026-10-05", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "SDGFERT", "Dosis": 1.0, "Tipo": "Siembra", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "63", "Fecha": "2026-10-05", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "semilla girasol", "Dosis": 0.3055555555555556, "Tipo": "Semilla", "Unidad": "bolsas", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "64", "Fecha": "2026-10-05", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "spt", "Dosis": 40.0, "Tipo": "Fertilizante", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "65", "Fecha": "2026-11-05", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "66", "Fecha": "2026-11-05", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "clearsol (kg)", "Dosis": 0.1, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "67", "Fecha": "2027-03-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "girasol", "Dosis": 2500.0, "Tipo": "Grano", "Unidad": "kg", "E/I": "Ingreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "68", "Fecha": "2027-03-01", "Activ": "Girasol", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "cosGi", "Dosis": 1.0, "Tipo": "Cosecha", "Unidad": "pasada", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "119", "Fecha": "2026-04-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "120", "Fecha": "2026-04-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "121", "Fecha": "2026-04-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.8, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "122", "Fecha": "2026-04-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "123", "Fecha": "2026-04-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-04-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "nabo", "Categoria": "Barbecho", "Produc/labor": "heat", "Dosis": 0.035, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "85", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Soja, Soja 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "86", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Soja, Soja 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "87", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Soja, Soja 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "88", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Soja, Soja 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "97", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Soja, Soja 2da", "Situacion": "nabo", "Categoria": "Barbecho", "Produc/labor": "heat", "Dosis": 0.035, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Soja, Soja 2da", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "cletodim 24%", "Dosis": 0.8, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "cletodim 24%", "Dosis": 0.8, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-06-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "RG", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "124", "Fecha": "2026-08-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "125", "Fecha": "2026-08-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "126", "Fecha": "2026-08-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "127", "Fecha": "2026-08-01", "Activ": "Maiz", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "98", "Fecha": "2026-09-01", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Barbecho corto", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "99", "Fecha": "2026-09-01", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Barbecho corto", "Produc/labor": "cletodim 24%", "Dosis": 0.8, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "100", "Fecha": "2026-09-01", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Barbecho corto", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "101", "Fecha": "2026-09-01", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "RG", "Categoria": "Barbecho corto", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "89", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "90", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "91", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "92", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "93", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Pre Siembra", "Produc/labor": "atrazina90", "Dosis": 2.0, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "94", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Pre Siembra", "Produc/labor": "dual gold", "Dosis": 1.3, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "95", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "coragen", "Dosis": 0.04, "Tipo": "Insecticida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 4, "Comentarios/Observaciones": ""}, {"Nro Registro": "96", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "102", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "Gramineas y RG", "Categoria": "Pre Siembra", "Produc/labor": "acuron uno", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "103", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "Gramineas y RG", "Categoria": "Pre Siembra", "Produc/labor": "dual gold", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "104", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "Colorado y Nabo", "Categoria": "Pre Siembra", "Produc/labor": "acuron uno", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "105", "Fecha": "2026-09-15", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "Colorado y Nabo", "Categoria": "Pre Siembra", "Produc/labor": "atrazina90", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "106", "Fecha": "2026-10-01", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "SDGFERT", "Dosis": 1.0, "Tipo": "Siembra", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "107", "Fecha": "2026-10-01", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "semilla maíz", "Dosis": 0.8125, "Tipo": "Semilla", "Unidad": "bolsas", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "108", "Fecha": "2026-10-01", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "map", "Dosis": 80.0, "Tipo": "Fertilizante", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "109", "Fecha": "2026-10-10", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Fertilizacion", "Produc/labor": "fertilizacion", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "110", "Fecha": "2026-10-10", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Fertilizacion", "Produc/labor": "urea", "Dosis": 140.0, "Tipo": "Fertilizante", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "111", "Fecha": "2026-11-05", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "112", "Fecha": "2026-11-05", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "113", "Fecha": "2026-11-05", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "callisto", "Dosis": 0.3, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 4, "Comentarios/Observaciones": ""}, {"Nro Registro": "114", "Fecha": "2026-11-05", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "atrazina90", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "115", "Fecha": "2026-11-05", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "116", "Fecha": "2026-11-05", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "117", "Fecha": "2027-04-20", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "cosMz", "Dosis": 1.0, "Tipo": "Cosecha", "Unidad": "pasada", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "118", "Fecha": "2027-04-20", "Activ": "Maiz", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "maíz", "Dosis": 8000.0, "Tipo": "Grano", "Unidad": "kg", "E/I": "Ingreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "187", "Fecha": "2026-04-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "188", "Fecha": "2026-04-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "189", "Fecha": "2026-04-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "190", "Fecha": "2026-04-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "191", "Fecha": "2026-04-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "143", "Fecha": "2026-05-20", "Activ": "Maiz tardio", "Antecesor": "Soja, Soja 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "144", "Fecha": "2026-05-20", "Activ": "Maiz tardio", "Antecesor": "Soja, Soja 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "145", "Fecha": "2026-05-20", "Activ": "Maiz tardio", "Antecesor": "Soja, Soja 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "146", "Fecha": "2026-05-20", "Activ": "Maiz tardio", "Antecesor": "Soja, Soja 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "147", "Fecha": "2026-05-20", "Activ": "Maiz tardio", "Antecesor": "Soja, Soja 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "192", "Fecha": "2026-07-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "193", "Fecha": "2026-07-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "194", "Fecha": "2026-07-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "195", "Fecha": "2026-07-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "197", "Fecha": "2026-07-01", "Activ": "Maiz tardio", "Antecesor": "Girasol o Maiz Silo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "atrazina90", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "148", "Fecha": "2026-09-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "149", "Fecha": "2026-09-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "150", "Fecha": "2026-09-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "151", "Fecha": "2026-09-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "152", "Fecha": "2026-09-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Barbecho", "Produc/labor": "atrazina90", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "153", "Fecha": "2026-09-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Colorado, pata de gallo, eleusine, cloris enlist, cloris No Enlist", "Categoria": "Barbecho", "Produc/labor": "acuron uno", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "154", "Fecha": "2026-09-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "155", "Fecha": "2026-10-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Barbecho corto", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "156", "Fecha": "2026-10-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Barbecho corto", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "157", "Fecha": "2026-10-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Barbecho corto", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "158", "Fecha": "2026-10-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Barbecho corto", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "159", "Fecha": "2026-10-15", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Base", "Categoria": "Barbecho corto", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "160", "Fecha": "2026-11-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Cloris No Enlist", "Categoria": "Barbecho corto", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "161", "Fecha": "2026-11-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Cloris No Enlist", "Categoria": "Barbecho corto", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "162", "Fecha": "2026-11-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Cloris No Enlist", "Categoria": "Barbecho corto", "Produc/labor": "galant max", "Dosis": 0.105, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "163", "Fecha": "2026-11-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Cloris No Enlist", "Categoria": "Barbecho corto", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "164", "Fecha": "2026-11-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Cloris No Enlist", "Categoria": "Barbecho corto", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "166", "Fecha": "2026-11-20", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "167", "Fecha": "2026-11-20", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "168", "Fecha": "2026-11-20", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "169", "Fecha": "2026-11-20", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "170", "Fecha": "2026-11-20", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "atrazina90", "Dosis": 2.0, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "171", "Fecha": "2026-11-20", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "dual gold", "Dosis": 1.3, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "172", "Fecha": "2026-11-20", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "173", "Fecha": "2026-11-25", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "SDGFERT", "Dosis": 1.0, "Tipo": "Siembra", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "174", "Fecha": "2026-11-25", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Base, Colorado, pata de gallo, cloris No Enlist", "Categoria": "Siembra", "Produc/labor": "semilla maíz", "Dosis": 0.75, "Tipo": "Semilla", "Unidad": "bolsas", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "175", "Fecha": "2026-11-25", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Cloris Enlist, Eleusine", "Categoria": "Siembra", "Produc/labor": "semilla maiz enlist", "Dosis": 0.75, "Tipo": "Semilla", "Unidad": "bolsas", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "176", "Fecha": "2026-11-25", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "map", "Dosis": 80.0, "Tipo": "Fertilizante", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "177", "Fecha": "2026-12-02", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Fertilizacion", "Produc/labor": "fertilizacion", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "178", "Fecha": "2026-12-02", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Fertilizacion", "Produc/labor": "urea verde", "Dosis": 120.0, "Tipo": "Fertilizante", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "179", "Fecha": "2027-01-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "180", "Fecha": "2027-01-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "181", "Fecha": "2027-01-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "182", "Fecha": "2027-01-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Colorado", "Categoria": "Post Emergencia", "Produc/labor": "atrazina90", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "183", "Fecha": "2027-01-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "Cloris Enlist, Eleusine", "Categoria": "Post Emergencia", "Produc/labor": "galant max", "Dosis": 0.105, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "184", "Fecha": "2027-01-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "185", "Fecha": "2027-06-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "cosMz", "Dosis": 1.0, "Tipo": "Cosecha", "Unidad": "pasada", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "186", "Fecha": "2027-06-01", "Activ": "Maiz tardio", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "maíz", "Dosis": 7500.0, "Tipo": "Grano", "Unidad": "kg", "E/I": "Ingreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "198", "Fecha": "2026-04-15", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "199", "Fecha": "2026-04-15", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "200", "Fecha": "2026-04-15", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.8, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "201", "Fecha": "2026-04-15", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "202", "Fecha": "2026-04-15", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "203", "Fecha": "2026-05-15", "Activ": "Soja", "Antecesor": "Maiz tardio o Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "PulvA", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "204", "Fecha": "2026-05-15", "Activ": "Soja", "Antecesor": "Maiz tardio o Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "205", "Fecha": "2026-05-15", "Activ": "Soja", "Antecesor": "Maiz tardio o Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "206", "Fecha": "2026-05-15", "Activ": "Soja", "Antecesor": "Maiz tardio o Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "207", "Fecha": "2026-06-01", "Activ": "Soja", "Antecesor": "Soja o Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "208", "Fecha": "2026-06-01", "Activ": "Soja", "Antecesor": "Soja o Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "209", "Fecha": "2026-06-01", "Activ": "Soja", "Antecesor": "Soja o Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "210", "Fecha": "2026-06-01", "Activ": "Soja", "Antecesor": "Soja o Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "211", "Fecha": "2026-06-01", "Activ": "Soja", "Antecesor": "Soja o Maiz", "Situacion": "todas", "Categoria": "Barbecho", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "255", "Fecha": "2026-08-10", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "256", "Fecha": "2026-08-10", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "257", "Fecha": "2026-08-10", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "258", "Fecha": "2026-08-10", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "259", "Fecha": "2026-08-10", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "Pata de gallo, Cloris, Echinocloa, Eleusine", "Categoria": "Barbecho corto", "Produc/labor": "ligate", "Dosis": 0.1, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "260", "Fecha": "2026-08-10", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "Base", "Categoria": "Barbecho corto", "Produc/labor": "clorimuron 25%", "Dosis": 0.08, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "261", "Fecha": "2026-08-10", "Activ": "Soja", "Antecesor": "Girasol o Maiz Humedo", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "217", "Fecha": "2026-09-15", "Activ": "Soja", "Antecesor": "Soja, Maiz, Maiz tardio, Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "218", "Fecha": "2026-09-15", "Activ": "Soja", "Antecesor": "Soja, Maiz, Maiz tardio, Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "219", "Fecha": "2026-09-15", "Activ": "Soja", "Antecesor": "Soja, Maiz, Maiz tardio, Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "220", "Fecha": "2026-09-15", "Activ": "Soja", "Antecesor": "Soja, Maiz, Maiz tardio, Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "221", "Fecha": "2026-09-15", "Activ": "Soja", "Antecesor": "Soja, Maiz, Maiz tardio, Maiz 2da", "Situacion": "Base", "Categoria": "Barbecho corto", "Produc/labor": "clorimuron 25%", "Dosis": 0.08, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-09-15", "Activ": "Soja", "Antecesor": "Soja, Maiz, Maiz tardio, Maiz 2da", "Situacion": "Pata de gallo, Cloris, Echinocloa, Eleusine", "Categoria": "Barbecho corto", "Produc/labor": "Ligate", "Dosis": 0.1, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "222", "Fecha": "2026-09-15", "Activ": "Soja", "Antecesor": "Soja, Maiz, Maiz tardio, Maiz 2da", "Situacion": "todas", "Categoria": "Barbecho corto", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "229", "Fecha": "2026-10-20", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "230", "Fecha": "2026-10-20", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "231", "Fecha": "2026-10-20", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "232", "Fecha": "2026-10-20", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "2,4d herbifen advance", "Dosis": 0.6, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-10-20", "Activ": "Soja", "Antecesor": "todos", "Situacion": "Colorado", "Categoria": "Pre Siembra", "Produc/labor": "heat", "Dosis": 0.035, "Tipo": "Herbicida", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 2, "Comentarios/Observaciones": ""}, {"Nro Registro": "233", "Fecha": "2026-10-20", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "authority", "Dosis": 0.4, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 4, "Comentarios/Observaciones": ""}, {"Nro Registro": "234", "Fecha": "2026-10-20", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "dual gold", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "235", "Fecha": "2026-10-20", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Pre Siembra", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-10-20", "Activ": "Soja", "Antecesor": "todos", "Situacion": "Lecheron", "Categoria": "Pre Siembra", "Produc/labor": "pivot", "Dosis": 1.0, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "237", "Fecha": "2026-10-25", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "SDGFERT", "Dosis": 1.0, "Tipo": "Siembra", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "238", "Fecha": "2026-10-25", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "spt", "Dosis": 40.0, "Tipo": "Fertilizante", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "239", "Fecha": "2026-10-25", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "semilla soja", "Dosis": 65.0, "Tipo": "Semilla", "Unidad": "kg", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "240", "Fecha": "2026-10-25", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Siembra", "Produc/labor": "inoculante", "Dosis": 1.0, "Tipo": "Inoculante", "Unidad": "pack", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "241", "Fecha": "2026-12-01", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "242", "Fecha": "2026-12-01", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "rizospray CS", "Dosis": 0.02, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 1, "Comentarios/Observaciones": ""}, {"Nro Registro": "243", "Fecha": "2026-12-01", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "glifosato", "Dosis": 2.5, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 8, "Comentarios/Observaciones": ""}, {"Nro Registro": "244", "Fecha": "2026-12-01", "Activ": "Soja", "Antecesor": "Maiz, Maiz Humedo, Maiz tardio, Maiz 2da", "Situacion": "Base, Eleusine", "Categoria": "Post Emergencia", "Produc/labor": "galant max", "Dosis": 0.07, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-12-01", "Activ": "Soja", "Antecesor": "todos", "Situacion": "Cloris", "Categoria": "Post Emergencia", "Produc/labor": "galant max", "Dosis": 0.105, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "", "Fecha": "2026-12-01", "Activ": "Soja", "Antecesor": "todos", "Situacion": "Echinocloa", "Categoria": "Post Emergencia", "Produc/labor": "cletodim 24%", "Dosis": 0.8, "Tipo": "Herbicida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "245", "Fecha": "2026-12-01", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Post Emergencia", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "246", "Fecha": "2027-01-15", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Insecticida I", "Produc/labor": "pulvT", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "247", "Fecha": "2027-01-15", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Insecticida I", "Produc/labor": "Abamectina 1.8%", "Dosis": 0.2, "Tipo": "Insecticida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "248", "Fecha": "2027-01-15", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Insecticida I", "Produc/labor": "bifentrin 10%", "Dosis": 0.2, "Tipo": "Insecticida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 5, "Comentarios/Observaciones": ""}, {"Nro Registro": "249", "Fecha": "2027-01-15", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Insecticida I", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "250", "Fecha": "2027-02-10", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Insecticida II", "Produc/labor": "PulvA", "Dosis": 1.0, "Tipo": "Labor", "Unidad": "ha", "E/I": "Egreso", "Orden de Carga": 0, "Comentarios/Observaciones": ""}, {"Nro Registro": "251", "Fecha": "2027-02-10", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Insecticida II", "Produc/labor": "engeo", "Dosis": 0.2, "Tipo": "Insecticida", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 4, "Comentarios/Observaciones": ""}, {"Nro Registro": "252", "Fecha": "2027-02-10", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Insecticida II", "Produc/labor": "aceite mso", "Dosis": 0.25, "Tipo": "Coadyuvante", "Unidad": "litros", "E/I": "Egreso", "Orden de Carga": 11, "Comentarios/Observaciones": ""}, {"Nro Registro": "253", "Fecha": "2027-04-01", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "cosSj", "Dosis": 1.0, "Tipo": "Cosecha", "Unidad": "pasada", "E/I": "Egreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}, {"Nro Registro": "254", "Fecha": "2027-04-01", "Activ": "Soja", "Antecesor": "todos", "Situacion": "todas", "Categoria": "Cosecha", "Produc/labor": "soja", "Dosis": 3000.0, "Tipo": "Grano", "Unidad": "kg", "E/I": "Ingreso", "Orden de Carga": 9999, "Comentarios/Observaciones": ""}];
+
+// ============================================================
+//  DISPLAY HELPER
+// ============================================================
+const U = s => s ? String(s).toUpperCase() : '';
+
+// ============================================================
+//  CONFIG LOGIN & SUPERFICIES GSHEETS
+// ============================================================
+const GS_SUP_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRSWLe4tqMGc70QQ9EPiNRZf1ZZOOgLNt6EYoNdRRH_rcS53VUrrviez5cEkAjoc0sYBg12LfxrNw9l/pub?gid=1360704003&single=true&output=csv';
+const GS_USR_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRSWLe4tqMGc70QQ9EPiNRZf1ZZOOgLNt6EYoNdRRH_rcS53VUrrviez5cEkAjoc0sYBg12LfxrNw9l/pub?gid=144263993&single=true&output=csv';
+// Hoja Usuarios: columnas Empresa | Contrasena
+const ADMIN_USER = 'ADMIN';        // usuario admin (no está en el GSheets, se valida abajo)
+const ADMIN_PASS = 'sosagro2627'; // ← CAMBIAR por contraseña segura
+
+// ============================================================
+//  STATE LOGIN
+// ============================================================
+let currentEmpresa = null; // empresa logueada
+let isAdmin = false;
+let gsSupRows = [];        // todas las filas del GSheets de superficies
+let adminEmpresaFilter = ''; // filtro activo en modo admin
 
 // ============================================================
 //  STATE
@@ -592,6 +766,297 @@ let supIdCounter = 1;
 let cmpView = 'detalle';
 
 // ============================================================
+//  SUPERFICIES DESDE GSHEETS
+// ============================================================
+function csvToSupRows(csvText) {
+  const lines = csvText.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,'').toLowerCase());
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
+    const vals = [];
+    let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { vals.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    vals.push(cur);
+    const row = {};
+    headers.forEach((h, idx) => row[h] = (vals[idx]||'').trim().replace(/^"|"$/g,''));
+    if (!row['empresa'] || !row['cultivo']) continue;
+    rows.push({
+      empresa:     row['empresa'],
+      responsable: row['responsable'] || '',
+      cultivo:     row['cultivo'],
+      antecesor:   row['antecesor'] || '',
+      situacion:   row['situacion'] || '',
+      ha:          parseFloat(String(row['superficie']||row['ha']||'0').replace(',','.')) || 0
+    });
+  }
+  return rows;
+}
+
+function applySuperficiesRows(rows) {
+  superficies.length = 0;
+  supIdCounter = 1;
+  for (const r of rows) {
+    superficies.push({
+      id: supIdCounter++,
+      empresa: r.empresa,
+      cultivo: r.cultivo,
+      antecesor: r.antecesor,
+      situacion: r.situacion,
+      ha: r.ha
+    });
+  }
+  renderSuperficies();
+}
+
+async function refreshSuperficies() {
+  const el = document.getElementById('sup-sync-status');
+  if (el) { el.textContent = '⏳ Actualizando superficies...'; el.style.color='#888'; }
+  try {
+    const text = await fetchWithFallback(GS_SUP_URL);
+    gsSupRows = csvToSupRows(text);
+    const filtered = isAdmin
+      ? (adminEmpresaFilter ? gsSupRows.filter(r => r.empresa === adminEmpresaFilter) : gsSupRows)
+      : gsSupRows.filter(r => r.empresa.toLowerCase() === currentEmpresa.toLowerCase());
+    applySuperficiesRows(filtered);
+    if (el) {
+      el.textContent = `✅ ${superficies.length} combinación(es) · ${isAdmin ? 'ADMIN' : currentEmpresa} · ${new Date().toLocaleTimeString('es-AR')}`;
+      el.style.color = '#2d6a2d';
+    }
+    // Actualizar selector admin si es necesario
+    if (isAdmin) _updateAdminEmpresaSelector();
+  } catch(e) {
+    if (el) { el.textContent = '❌ Error: ' + e.message; el.style.color = '#c0392b'; }
+  }
+}
+
+function _updateAdminEmpresaSelector() {
+  const sel = document.getElementById('admin-empresa-sel');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Todas</option>';
+  const empresas = [...new Set(gsSupRows.map(r => r.empresa))].sort();
+  for (const e of empresas) sel.innerHTML += `<option value="${e}"${e===cur?' selected':''}>${e}</option>`;
+}
+
+function setAdminEmpresaFilter(empresa) {
+  adminEmpresaFilter = empresa;
+  const filtered = empresa ? gsSupRows.filter(r => r.empresa === empresa) : gsSupRows;
+  applySuperficiesRows(filtered);
+  const el = document.getElementById('sup-sync-status');
+  if (el) {
+    el.textContent = empresa
+      ? `📊 ${filtered.length} combinación(es) · Empresa: ${empresa}`
+      : `📊 ${filtered.length} combinación(es) · Todas las empresas`;
+    el.style.color = '#2d6a2d';
+  }
+  // Re-render tab activo si no es superficies
+  const activeTab = document.querySelector('.tab-content.active')?.id?.replace('tab-','');
+  if (activeTab && activeTab !== 'superficies') showTabByName(activeTab);
+}
+
+// ============================================================
+//  LOGIN / LOGOUT
+// ============================================================
+// Parsea la hoja Usuarios: columnas Empresa | Contrasena
+function _parseUsuarios(csvText) {
+  const lines = csvText.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,'').toLowerCase());
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i]; if (!line.trim()) continue;
+    const vals = [];
+    let cur = '', inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { vals.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    vals.push(cur);
+    const row = {};
+    headers.forEach((h, idx) => row[h] = (vals[idx]||'').trim().replace(/^"|"$/g,''));
+    if (row['empresa'] && row['contrasena']) rows.push({ empresa: row['empresa'], contrasena: row['contrasena'] });
+  }
+  return rows;
+}
+
+async function doLogin() {
+  const empInput  = (document.getElementById('login-empresa').value || '').trim();
+  const passInput = document.getElementById('login-pass').value || '';
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('login-btn');
+
+  if (!empInput || !passInput) {
+    errEl.textContent = 'Completá empresa y contraseña.';
+    return;
+  }
+  errEl.textContent = '';
+  btn.disabled = true; btn.textContent = '⏳ Verificando...';
+
+  try {
+    // ── ADMIN: valida contra constante, no consulta hoja usuarios ──
+    if (empInput.toUpperCase() === ADMIN_USER && passInput === ADMIN_PASS) {
+      const supText = await fetchWithFallback(GS_SUP_URL);
+      gsSupRows = csvToSupRows(supText);
+      _showApp('ADMIN', true);
+      return;
+    }
+
+    // ── EMPRESA: busca credenciales en hoja Usuarios ──
+    const usrText = await fetchWithFallback(GS_USR_URL);
+    const usrRows = _parseUsuarios(usrText);
+
+    const usrMatch = usrRows.find(r => r.empresa.toLowerCase() === empInput.toLowerCase());
+    if (!usrMatch) {
+      errEl.textContent = 'Empresa no encontrada.';
+      btn.disabled = false; btn.textContent = 'Ingresar';
+      return;
+    }
+    if (usrMatch.contrasena !== passInput) {
+      errEl.textContent = 'Contraseña incorrecta.';
+      btn.disabled = false; btn.textContent = 'Ingresar';
+      return;
+    }
+
+    // Credenciales OK → cargar superficies
+    const supText = await fetchWithFallback(GS_SUP_URL);
+    gsSupRows = csvToSupRows(supText);
+    _showApp(usrMatch.empresa, false);
+
+  } catch(e) {
+    errEl.textContent = '❌ Error de conexión: ' + e.message;
+    btn.disabled = false; btn.textContent = 'Ingresar';
+  }
+}
+
+function _showApp(empresa, admin) {
+  currentEmpresa = empresa;
+  isAdmin = admin;
+  adminEmpresaFilter = '';
+
+  // Ocultar overlay
+  document.getElementById('login-overlay').style.display = 'none';
+
+  // Badge empresa en header
+  const badge = document.getElementById('empresa-badge');
+  if (badge) {
+    badge.textContent = isAdmin ? '🔑 ADMIN' : empresa;
+    badge.className = isAdmin ? 'admin-badge' : 'empresa-badge';
+    document.getElementById('empresa-badge-wrap').style.display = '';
+  }
+  document.getElementById('logout-btn').style.display = '';
+
+  // Admin: mostrar selector de empresa
+  if (isAdmin) {
+    const wrap = document.getElementById('admin-empresa-wrap');
+    if (wrap) { wrap.style.display = 'flex'; _updateAdminEmpresaSelector(); }
+  }
+
+  // Cargar dosisOverrides del cache para esta empresa
+  const ck = 'sosagro_2627_' + (admin ? 'admin' : empresa);
+  try {
+    const raw = localStorage.getItem(ck);
+    if (raw) {
+      const d = JSON.parse(raw);
+      if (d.dosisOverrides)   Object.assign(dosisOverrides, d.dosisOverrides);
+      if (d.prodNameOverrides) Object.assign(prodNameOverrides, d.prodNameOverrides);
+    }
+  } catch(e) {}
+
+  // Cargar superficies filtradas
+  const filtered = isAdmin
+    ? gsSupRows
+    : gsSupRows.filter(r => r.empresa.toLowerCase() === empresa.toLowerCase());
+  applySuperficiesRows(filtered);
+
+  // Actualizar status bar
+  const el = document.getElementById('sup-sync-status');
+  if (el) {
+    el.textContent = `✅ ${superficies.length} combinación(es) cargadas · ${isAdmin ? 'ADMIN - todas las empresas' : empresa}`;
+    el.style.color = '#2d6a2d';
+  }
+
+  // Activar tab superficies visualmente
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', i===0));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-superficies').classList.add('active');
+
+  // Init resto de la app
+  initPorhaAnts();
+  updatePltFiltros();
+  populateInsTipos();
+  loadFromGSheets(); // carga datos de planteo desde GSheets
+}
+
+function doLogout() {
+  if (!confirm('¿Cerrar sesión?')) return;
+  // Guardar dosis en cache con clave empresa
+  const ck = 'sosagro_2627_' + (isAdmin ? 'admin' : currentEmpresa);
+  try { localStorage.setItem(ck, JSON.stringify({dosisOverrides, prodNameOverrides, ts:Date.now()})); } catch(e) {}
+
+  // Reset
+  currentEmpresa = null; isAdmin = false; gsSupRows = []; adminEmpresaFilter = '';
+  superficies.length = 0; supIdCounter = 1;
+  Object.keys(dosisOverrides).forEach(k => delete dosisOverrides[k]);
+  Object.keys(prodNameOverrides).forEach(k => delete prodNameOverrides[k]);
+
+  // Reset UI
+  document.getElementById('login-overlay').style.display = 'flex';
+  document.getElementById('login-empresa').value = '';
+  document.getElementById('login-pass').value = '';
+  document.getElementById('login-error').textContent = '';
+  document.getElementById('login-btn').disabled = false;
+  document.getElementById('login-btn').textContent = 'Ingresar';
+  document.getElementById('empresa-badge-wrap').style.display = 'none';
+  document.getElementById('logout-btn').style.display = 'none';
+  document.getElementById('admin-empresa-wrap').style.display = 'none';
+}
+
+// ============================================================
+//  CACHE: localStorage para persistencia
+// ============================================================
+const CACHE_KEY = 'sosagro_26_27_v2';
+function saveToCache() {
+  if (!currentEmpresa) return; // no guardar si no hay sesión
+  const ck = 'sosagro_2627_' + (isAdmin ? 'admin' : currentEmpresa);
+  try {
+    localStorage.setItem(ck, JSON.stringify({dosisOverrides, prodNameOverrides, ts:Date.now()}));
+    showCacheStatus('💾 Guardado', '#a5d6a7');
+  } catch(e) { console.warn('Cache error:', e); }
+}
+function loadFromCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    if (data.superficies) { superficies.length = 0; data.superficies.forEach(s => superficies.push(s)); }
+    if (data.supIdCounter) supIdCounter = data.supIdCounter;
+    if (data.dosisOverrides) Object.assign(dosisOverrides, data.dosisOverrides);
+    if (data.prodNameOverrides) Object.assign(prodNameOverrides, data.prodNameOverrides);
+    return true;
+  } catch(e) { return false; }
+}
+function clearCache() {
+  if (!confirm('¿Borrar dosis modificadas guardadas?')) return;
+  const ck = 'sosagro_2627_' + (isAdmin ? 'admin' : currentEmpresa);
+  localStorage.removeItem(ck);
+  Object.keys(dosisOverrides).forEach(k => delete dosisOverrides[k]);
+  Object.keys(prodNameOverrides).forEach(k => delete prodNameOverrides[k]);
+  showCacheStatus('🗑️ Borrado', '#ef9a9a');
+}
+function showCacheStatus(msg, color) {
+  const el = document.getElementById('cache-status');
+  if (el) { el.textContent = msg; el.style.color = color; setTimeout(() => el.textContent = '', 2500); }
+}
+
+// ============================================================
 //  HELPERS
 // ============================================================
 function fmtNum(n, dec=2) {
@@ -605,7 +1070,7 @@ function fmtNumAuto(n) {
   return v.toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 4});
 }
 function cultivoBadge(c) {
-  const m = {Trigo:'trigo',Cebada:'cebada',Soja:'soja',Maiz:'maiz',Girasol:'girasol','Maiz tardio':'tardio','Maiz 2da':'maiz2da','Soja 2da':'soja2da'};
+  const m = {Trigo:'trigo',Cebada:'cebada',Soja:'soja',Maiz:'maiz',Girasol:'girasol','Maiz tardio':'tardio','Maiz 2da':'maiz','Soja 2da':'soja'};
   return `<span class="badge badge-${m[c]||'tipo'}">${c}</span>`;
 }
 function tipoBadge(t) {
@@ -681,6 +1146,8 @@ function showTab(name) {
   if (name === 'mensual') renderMensual();
   if (name === 'precios') renderPrecios();
   if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
+  if (name === 'costo') { initCiDefaults(); }
+  if (name === 'margen') { initMbFiltros(); renderMargen(); }
 }
 
 // ============================================================
@@ -691,7 +1158,7 @@ function updateAntecesores() {
   const sel = document.getElementById('sel-antecesor');
   sel.innerHTML = '<option value="">-- seleccionar --</option>';
   if (!c) return;
-  for (const a of OPTIONS[c].antecesores) sel.innerHTML += `<option>${a}</option>`;
+  for (const a of OPTIONS[c].antecesores) sel.innerHTML += `<option value="${a}">${U(a)}</option>`;
   document.getElementById('sel-situacion').innerHTML = '<option value="">-- seleccionar --</option>';
 }
 function updateSituaciones() {
@@ -700,7 +1167,7 @@ function updateSituaciones() {
   const sel = document.getElementById('sel-situacion');
   sel.innerHTML = '<option value="">-- seleccionar --</option>';
   if (!c || !a) return;
-  for (const s of getSituacionesDisplay(c)) sel.innerHTML += `<option>${s}</option>`;
+  for (const s of getSituacionesDisplay(c)) sel.innerHTML += `<option value="${s}">${U(s)}</option>`;
 }
 function addSuperficie() {
   const c = document.getElementById('sel-cultivo').value;
@@ -712,41 +1179,102 @@ function addSuperficie() {
   if (superficies.find(x => x.cultivo===c && x.antecesor===a && x.situacion===s)) return alert('Esa combinación ya está cargada.');
   superficies.push({id: supIdCounter++, cultivo:c, antecesor:a, situacion:s, ha});
   renderSuperficies();
+  saveToCache();
 }
 function removeSuperficie(id) {
   superficies = superficies.filter(s => s.id !== id);
   renderSuperficies();
+  saveToCache();
 }
 function updateHa(id, val) {
   const s = superficies.find(x => x.id === id);
   if (s) s.ha = parseFloat(val) || 0;
   updateHeaderResumen();
   updateCards();
+  saveToCache();
 }
 function renderSuperficies() {
   const wrap = document.getElementById('tabla-superficies-wrap');
   if (!superficies.length) {
-    wrap.innerHTML = '<p class="empty">Ninguna superficie cargada. Usá el formulario de arriba para agregar combinaciones.</p>';
-    updateCards();
-    updateHeaderResumen();
+    wrap.innerHTML = '<p class="empty">Sin superficies para esta empresa. Verificá el GSheets o presioná 🔄 Actualizar.</p>';
+    updateCards(); updateHeaderResumen(); updatePieChart();
     return;
   }
-  let html = `<table><thead><tr><th>Cultivo</th><th>Antecesor</th><th>Situación</th><th class="num">Hectáreas</th><th>Ítems planteo</th><th></th></tr></thead><tbody>`;
+  const showEmp = isAdmin && !adminEmpresaFilter;
+  let html = `<table><thead><tr>
+    ${showEmp ? '<th>EMPRESA</th>' : ''}
+    <th>CULTIVO</th><th>ANTECESOR</th><th>SITUACIÓN</th>
+    <th class="num">HECTÁREAS</th><th>ÍTEMS PLANTEO</th>
+  </tr></thead><tbody>`;
   for (const s of superficies) {
     const recs = filterRecords(s.cultivo, s.antecesor, s.situacion);
     html += `<tr>
+      ${showEmp ? `<td style="text-align:left;font-weight:600;color:var(--acento)">${s.empresa||''}</td>` : ''}
       <td>${cultivoBadge(s.cultivo)}</td>
-      <td>${s.antecesor}</td>
-      <td>${s.situacion}</td>
-      <td class="num"><input class="ha-input" type="number" value="${s.ha}" min="0" step="0.1" onchange="updateHa(${s.id},this.value)" onblur="renderSuperficies()"></td>
+      <td>${U(s.antecesor)}</td>
+      <td>${U(s.situacion)}</td>
+      <td class="num"><strong>${fmtNum(s.ha,1)}</strong> ha</td>
       <td><small>${recs.length} ítems del planteo base</small></td>
-      <td><button class="btn btn-danger" onclick="removeSuperficie(${s.id})">✕</button></td>
     </tr>`;
   }
   html += '</tbody></table>';
   wrap.innerHTML = html;
-  updateCards();
-  updateHeaderResumen();
+  updateCards(); updateHeaderResumen(); updatePieChart();
+}
+function updateSupAntecesor(id, val) {
+  const s = superficies.find(x => x.id === id);
+  if (!s) return;
+  s.antecesor = val;
+  // reset situacion to first available if no longer valid
+  const sits = getSituacionesDisplay(s.cultivo);
+  if (!sits.includes(s.situacion)) s.situacion = sits[0] || '';
+  renderSuperficies();
+  saveToCache();
+}
+function updateSupSituacion(id, val) {
+  const s = superficies.find(x => x.id === id);
+  if (s) { s.situacion = val; saveToCache(); }
+}
+let _pieChart = null;
+function updatePieChart() {
+  const wrap = document.getElementById('pie-chart-wrap');
+  if (!superficies.length) { wrap.style.display = 'none'; if (_pieChart) { _pieChart.destroy(); _pieChart = null; } return; }
+  wrap.style.display = 'block';
+  const byCultivo = {};
+  for (const s of superficies) {
+    byCultivo[s.cultivo] = (byCultivo[s.cultivo] || 0) + s.ha;
+  }
+  const labels = Object.keys(byCultivo);
+  const data = labels.map(c => byCultivo[c]);
+  const colorMap = {
+    'Trigo': '#c8a84b', 'Cebada': '#4a9a4a', 'Soja': '#2196f3',
+    'Maiz': '#e53935', 'Girasol': '#fdd835', 'Maiz tardio': '#8e24aa',
+    'Maiz 2da': '#ef9a9a', 'Soja 2da': '#90caf9'
+  };
+  const colors = labels.map(c => colorMap[c] || '#90a4ae');
+  const ctx = document.getElementById('pie-chart').getContext('2d');
+  if (_pieChart) _pieChart.destroy();
+  _pieChart = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels,
+      datasets: [{ data, backgroundColor: colors, borderColor: '#fff', borderWidth: 2 }]
+    },
+    options: {
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 }, boxWidth: 14, padding: 8 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const total = ctx.dataset.data.reduce((a,b)=>a+b,0);
+              const pct = total ? ((ctx.parsed/total)*100).toFixed(1) : 0;
+              return ` ${fmtNum(ctx.parsed,1)} ha (${pct}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
 }
 function updateCards() {
   const totalHa = superficies.reduce((a,s) => a+s.ha, 0);
@@ -760,6 +1288,7 @@ function updateCards() {
     html += `<div class="card"><div class="card-label">${c}</div><div class="card-value">${fmtNum(ha,1)}</div><div class="card-sub">ha</div></div>`;
   }
   document.getElementById('resumen-cards').innerHTML = html;
+  updatePieChart();
 }
 function updateHeaderResumen() {
   const totalHa = superficies.reduce((a,s) => a+s.ha, 0);
@@ -776,8 +1305,8 @@ function updatePltFiltros() {
   selA.innerHTML = '<option value="">Todos</option>';
   selS.innerHTML = '<option value="">Todas</option>';
   if (cv && OPTIONS[cv]) {
-    for (const a of OPTIONS[cv].antecesores) selA.innerHTML += `<option>${a}</option>`;
-    for (const s of getSituacionesDisplay(cv)) selS.innerHTML += `<option>${s}</option>`;
+    for (const a of OPTIONS[cv].antecesores) selA.innerHTML += `<option value="${a}">${U(a)}</option>`;
+    for (const s of getSituacionesDisplay(cv)) selS.innerHTML += `<option value="${s}">${U(s)}</option>`;
   }
   // Populate tipo ms
   const tipos = ['Coadyuvante','Fertilizante','Fungicida','Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra','Cosecha'];
@@ -785,12 +1314,20 @@ function updatePltFiltros() {
   msTipo.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-plt-tipo-all" onchange="toggleMsAll('ms-plt-tipo','ms-plt-tipo-btn','ms-plt-tipo-all','Todos')"> <em>Todos</em></label>`
     + tipos.map(t => `<label class="ms-item"><input type="checkbox" value="${t}" onchange="refreshMsBtn('ms-plt-tipo','ms-plt-tipo-btn')">${t}</label>`).join('');
   document.getElementById('ms-plt-tipo-btn').textContent = `Todos (${tipos.length})`;
+  // Poblar filtro Categoría en planteo
+  const catsPlt = [...new Set(RECORDS.filter(r=>r['E/I'].toLowerCase()==='egreso'&&r.Tipo.toLowerCase()!=='grano').map(r=>r.Categoria))].sort();
+  const msPltCat = document.getElementById('ms-plt-cat');
+  if (msPltCat) {
+    msPltCat.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-plt-cat-all" onchange="toggleMsAll('ms-plt-cat','ms-plt-cat-btn','ms-plt-cat-all','Todas')"> <em>Todas</em></label>`
+      + catsPlt.map(c => `<label class="ms-item"><input type="checkbox" value="${c}" onchange="refreshMsBtn('ms-plt-cat','ms-plt-cat-btn')">${c}</label>`).join('');
+    document.getElementById('ms-plt-cat-btn').textContent = `Todas (${catsPlt.length})`;
+  }
   renderPlanteo();
 }
 // Fertilizante fosforado: cultivos que usan la lista Fina
 function getFertFosList(cultivo) {
-  if (['Trigo','Cebada','Maiz','Maiz tardio','Maiz 2da'].includes(cultivo)) return FERT_FOS_FINA;
-  if (['Soja','Girasol','Soja 2da'].includes(cultivo)) return FERT_FOS_SOJA;
+  if (['Trigo','Cebada','Maiz','Maiz tardio'].includes(cultivo)) return FERT_FOS_FINA;
+  if (['Soja','Girasol'].includes(cultivo)) return FERT_FOS_SOJA;
   return null;
 }
 function isFertFos(r, cultivo) {
@@ -805,40 +1342,65 @@ function rowKey(supId, r) {
 }
 function getDosis(supId, r) {
   const k = rowKey(supId, r);
-  if (dosisOverrides[k] != null) return dosisOverrides[k];
-  const gk = `${r['Nro Registro']}|${r.Fecha}|${r['Produc/labor']}`;
-  if (dosisOverrides[gk] != null) return dosisOverrides[gk];
-  return r.Dosis;
+  return dosisOverrides[k] != null ? dosisOverrides[k] : r.Dosis;
 }
-function onDosisChange(supId, nro, fecha, prod, ha, val) {
-  const k = `${supId}|${nro}|${fecha}|${prod}`;
-  const gk = `${nro}|${fecha}|${prod}`; // key global (sin supId) para propagar a otras pestañas
-  const newDosis = parseFloat(val) || 0;
-  dosisOverrides[k] = newDosis;
-  dosisOverrides[gk] = newDosis;
-  // Update total cell inline
-  const totalEl = document.getElementById('total-'+CSS.escape(k));
-  if (totalEl) totalEl.textContent = fmtNumAuto(newDosis * ha);
+function onDosisChangeEl(el) {
+  const supId = parseInt(el.dataset.supId);
+  const nro = el.dataset.nro;
+  const fecha = el.dataset.fecha;
+  const prod = el.dataset.prod;
+  const ha = parseFloat(el.dataset.ha);
+  const k = el.dataset.k;       // the dosisOverrides key
+  const domId = el.dataset.domId; // the safe DOM id prefix
+  onDosisChange(supId, nro, fecha, prod, ha, el.value, k, domId);
+}
+function onDosisChange(supId, nro, fecha, prod, ha, val, kOverride, domId) {
+  const k = kOverride !== undefined ? kOverride : `${supId}|${nro}|${fecha}|${prod}`;
+  dosisOverrides[k] = parseFloat(val) || 0;
+  const newDosis = dosisOverrides[k];
+
+  // Update total cell inline using safe domId
+  const pfx = domId || k;
+  const totalEl = document.getElementById('total-'+pfx);
+  if (totalEl) totalEl.innerHTML = `<strong>${fmtNumAuto(newDosis * ha)}</strong>`;
+
+  // Recalcular costo ha y costo total
+  const sup = superficies.find(s => s.id === supId);
+  if (sup) {
+    const recs = filterRecords(sup.cultivo, sup.antecesor, sup.situacion);
+    const rec = recs.find(r => String(r['Nro Registro']) === String(nro) && r.Fecha === fecha && r['Produc/labor'] === prod)
+               || recs.find(r => r.Fecha === fecha && r['Produc/labor'] === prod);
+    if (rec) {
+      const prodForPrice = prodNameOverrides[k] || rec['Produc/labor'];
+      const precio = getPrecio(prodForPrice, rec.Unidad);
+      const costoHa = precio !== null ? precio * newDosis : null;
+      const costoTotal = precio !== null ? precio * newDosis * sup.ha : null;
+      const costoHaEl = document.getElementById('costoha-'+pfx);
+      const costoTotEl = document.getElementById('costotot-'+pfx);
+      if (costoHaEl) costoHaEl.innerHTML = fmtCosto(costoHa);
+      if (costoTotEl) costoTotEl.innerHTML = fmtCosto(costoTotal);
+    }
+  }
+  saveToCache();
 }
 function onFertChange(selectEl) {
   const cultivo = selectEl.dataset.cultivo;
   const rk = selectEl.dataset.rk;
   const ha = parseFloat(selectEl.dataset.ha);
+  const domId = selectEl.dataset.domId;
   const list = getFertFosList(cultivo);
   const opt = list.find(o => o.prod === selectEl.value);
   if (!opt) return;
   dosisOverrides[rk] = opt.dosis;
-  const gk = rk.split('|').slice(1).join('|'); // key global sin supId
-  dosisOverrides[gk] = opt.dosis;
   prodNameOverrides[rk] = opt.prod;
-  const dosisEl = document.getElementById('dosis-'+CSS.escape(rk));
+  const pfx = domId || rk;
+  const dosisEl = document.getElementById('dosis-'+pfx);
   if (dosisEl) dosisEl.value = opt.dosis;
-  const totalEl = document.getElementById('total-'+CSS.escape(rk));
+  const totalEl = document.getElementById('total-'+pfx);
   if (totalEl) totalEl.textContent = fmtNumAuto(opt.dosis * ha);
-  // Update cost cells
   const precio = getPrecio(opt.prod, 'kg');
-  const costohaEl = document.getElementById('costoha-'+CSS.escape(rk));
-  const costototEl = document.getElementById('costotot-'+CSS.escape(rk));
+  const costohaEl = document.getElementById('costoha-'+pfx);
+  const costototEl = document.getElementById('costotot-'+pfx);
   if (costohaEl) costohaEl.innerHTML = fmtCosto(precio !== null ? precio * opt.dosis : null);
   if (costototEl) costototEl.innerHTML = fmtCosto(precio !== null ? precio * opt.dosis * ha : null);
 }
@@ -862,16 +1424,19 @@ function renderPlanteo() {
     wrap.innerHTML = '<p class="empty">Sin superficies para los filtros seleccionados.</p>';
     return;
   }
+  const fCats = getMsSelected('ms-plt-cat');
+  const pltId = 'plt-table';
   let html = '';
+
   for (const s of sups) {
     let recs = filterRecords(s.cultivo, s.antecesor, s.situacion);
     if (fTipos.length > 0) recs = recs.filter(r => fTipos.includes(r.Tipo));
-    // Attach cultivo to each rec for fertilizante detection
+    if (fCats.length > 0)  recs = recs.filter(r => fCats.includes(r.Categoria));
     recs.forEach(r => r._cultivo = s.cultivo);
-    html += `<div style="margin-bottom:24px">
-      <div class="planteo-cultivo-header">${cultivoBadge(s.cultivo)}
-        <small>Ant: ${s.antecesor} &nbsp;|&nbsp; Sit: ${s.situacion} &nbsp;|&nbsp; ${fmtNum(s.ha,1)} ha · ${recs.length} ítems</small>
-      </div>`;
+
+    const supUid = `plt-${s.id}`;
+
+    // Agrupar por fecha+categoria para filas de sección
     const groups = {};
     const groupOrder = [];
     for (const r of recs) {
@@ -879,29 +1444,68 @@ function renderPlanteo() {
       if (!groups[k]) { groups[k] = []; groupOrder.push(k); }
       groups[k].push(r);
     }
+
+    // Costo total
+    let totalCostoSup = 0, nSinPrecio = 0;
+    for (const r of recs) {
+      const rk = rowKey(s.id, r);
+      const d = getDosis(s.id, r);
+      const pn = prodNameOverrides[rk] || r['Produc/labor'];
+      const p = getPrecio(pn, r.Unidad);
+      if (p !== null) totalCostoSup += p * d * s.ha;
+      else nSinPrecio++;
+    }
+
+    // Colgroup con anchos fijos iguales para todas las superficies
+    const colgroup = `<colgroup>
+      <col style="width:30%"><col style="width:11%">
+      <col style="width:9%"><col style="width:8%">
+      <col style="width:13%"><col style="width:11%"><col style="width:11%">
+    </colgroup>`;
+    const theadRow = `<tr>
+      <th style="text-align:left;border-radius:6px 0 0 0">Producto / Labor</th>
+      <th>Tipo</th><th style="text-align:right">Dosis/ha</th><th>Unidad</th>
+      <th style="text-align:right">Total (${fmtNum(s.ha,1)} ha)</th>
+      <th style="text-align:right">u$s/ha</th>
+      <th style="text-align:right;border-radius:0 6px 0 0">u$s total</th>
+    </tr>`;
+
+    html += `<div class="planteo-section" style="margin-bottom:28px">
+      <!-- Encabezado del cultivo/situacion -->
+      <div class="planteo-cultivo-header">${cultivoBadge(s.cultivo)}
+        <small>Ant: ${U(s.antecesor)} &nbsp;|&nbsp; Sit: ${U(s.situacion)} &nbsp;|&nbsp; ${fmtNum(s.ha,1)} ha · ${recs.length} ítems</small>
+      </div>
+
+      <!-- Header sticky separado (igual que comparativo) -->
+      <div class="plt-thead-sticky" id="plt-thead-${supUid}">
+        <table class="tbl-prod" style="table-layout:fixed;margin-bottom:0;border-radius:0;box-shadow:none">
+          ${colgroup}<thead>${theadRow}</thead>
+        </table>
+      </div>
+
+      <!-- Cuerpo: una sola tabla con filas de sección intercaladas -->
+      <div class="plt-body" id="plt-body-${supUid}">
+        <table class="tbl-prod" style="table-layout:fixed;border-radius:0 0 6px 6px">
+          ${colgroup}<tbody>`;
+
+    let rowIdx = 0;
     for (const gk of groupOrder) {
       const [fecha, cat] = gk.split('||');
       const items = groups[gk];
-      html += `<div class="cat-group">
-        <div class="cat-header">
-          <span>📅 <strong>${fecha}</strong> &nbsp;—&nbsp; ${cat}</span>
-          <span style="font-size:11px;color:#aaa">${items.length} ítem${items.length>1?'s':''}</span>
-        </div>
-        <table class="tbl-prod"><thead><tr>
-          <th>Producto / Labor</th><th>Tipo</th>
-          <th>Dosis/ha</th><th>Unidad</th>
-          <th>Total (${fmtNum(s.ha,1)} ha)</th>
-          <th>u$s/ha</th><th>u$s total</th>
-        </tr></thead><tbody>`;
+      // Fila de sección (fecha / categoría)
+      html += `<tr style="background:var(--verde-bg)">
+        <td colspan="7" style="text-align:left;padding:6px 10px;font-weight:700;font-size:12px;color:var(--acento);border-top:2px solid var(--verde-borde)">
+          📅 <strong>${fecha}</strong> &nbsp;—&nbsp; ${cat}
+          <span style="font-weight:400;font-size:11px;color:#888;margin-left:8px">${items.length} ítem${items.length>1?'s':''}</span>
+        </td></tr>`;
       for (const r of items) {
         const k = rowKey(s.id, r);
         const dosis = getDosis(s.id, r);
+        const domId = `r${s.id}_${rowIdx++}`;
         const fertList = isFertFos(r, s.cultivo) ? getFertFosList(s.cultivo) : null;
         const prodCell = fertList
-          ? `<select class="fert-select"
-              data-cultivo="${s.cultivo}" data-rk="${k}" data-ha="${s.ha}"
-              onchange="onFertChange(this)">
-              ${fertList.map(o => `<option value="${o.prod}"${r['Produc/labor'].toLowerCase().includes(o.prod)?'selected':''}>${o.label}</option>`).join('')}
+          ? `<select class="fert-select" data-cultivo="${s.cultivo}" data-rk="${k}" data-ha="${s.ha}" data-dom-id="${domId}" onchange="onFertChange(this)">
+               ${fertList.map(o => `<option value="${o.prod}"${r['Produc/labor'].toLowerCase().includes(o.prod)?'selected':''}>${o.label}</option>`).join('')}
              </select>`
           : `<strong>${r['Produc/labor']}</strong>`;
         const prodForPrice = prodNameOverrides[k] || r['Produc/labor'];
@@ -911,35 +1515,34 @@ function renderPlanteo() {
         html += `<tr>
           <td>${prodCell}</td>
           <td>${tipoBadge(r.Tipo)}</td>
-          <td><input id="dosis-${k}" class="dosis-input" type="number" step="any" value="${dosis}"
-            onchange="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"
-            oninput="onDosisChange(${s.id},'${r['Nro Registro']}','${r.Fecha}','${r['Produc/labor']}',${s.ha},this.value)"></td>
+          <td style="text-align:right"><input id="dosis-${domId}" class="dosis-input" type="number" step="any" value="${dosis}"
+            data-sup-id="${s.id}" data-nro="${(r['Nro Registro']||'')}" data-fecha="${r.Fecha}" data-prod="${(r['Produc/labor']||'').replace(/"/g,'&quot;')}" data-ha="${s.ha}" data-k="${k}" data-dom-id="${domId}"
+            onchange="onDosisChangeEl(this)" oninput="onDosisChangeEl(this)"></td>
           <td>${r.Unidad}</td>
-          <td id="total-${k}"><strong>${fmtNumAuto(dosis * s.ha)}</strong></td>
-          <td id="costoha-${k}">${fmtCosto(costoHa)}</td>
-          <td id="costotot-${k}">${fmtCosto(costoTotal)}</td>
+          <td id="total-${domId}" style="text-align:right"><strong>${fmtNumAuto(dosis * s.ha)}</strong></td>
+          <td id="costoha-${domId}" style="text-align:right">${fmtCosto(costoHa)}</td>
+          <td id="costotot-${domId}" style="text-align:right">${fmtCosto(costoTotal)}</td>
         </tr>`;
       }
-      html += `</tbody></table></div>`;
     }
-    // Total costo de esta superficie
-    const allRecsForCost = recs;
-    let totalCostoSup = 0, nSinPrecio = 0;
-    for (const r of allRecsForCost) {
-      const rk = rowKey(s.id, r);
-      const d = getDosis(s.id, r);
-      const pn = prodNameOverrides[rk] || r['Produc/labor'];
-      const p = getPrecio(pn, r.Unidad);
-      if (p !== null) totalCostoSup += p * d * s.ha;
-      else nSinPrecio++;
-    }
-    html += `<div class="total-costo-bar">
-      <span>💵 Costo total estimado: <strong>u$s ${totalCostoSup.toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0})}</strong></span>
-      ${nSinPrecio>0?`<span style="color:#999">${nSinPrecio} ítem(s) sin precio</span>`:''}
+
+    html += `</tbody></table></div>
+      <div class="total-costo-bar">
+        <span>💵 Costo total estimado: <strong>u$s ${totalCostoSup.toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0})}</strong></span>
+        ${nSinPrecio>0?`<span style="color:#999">${nSinPrecio} ítem(s) sin precio</span>`:''}
+      </div>
     </div>`;
-    html += `</div>`;
   }
+
   wrap.innerHTML = html;
+
+  // Sticky top para cada header de superficie
+  setTimeout(() => {
+    document.querySelectorAll('.plt-thead-sticky').forEach(el => {
+      el.style.setProperty('top', getComputedStyle(document.documentElement).getPropertyValue('--sticky-top') || '0px');
+    });
+    updateStickyTop();
+  }, 30);
 }
 
 // ============================================================
@@ -968,8 +1571,18 @@ function toggleMsAll(msId, btnId, allChkId, label) {
   document.querySelectorAll(`#${msId} input:not(#${allChkId})`).forEach(cb => cb.checked = checked);
   const count = document.querySelectorAll(`#${msId} input:not(#${allChkId})`).length;
   document.getElementById(btnId).textContent = checked ? `${label} (${count})` : `${label} (0)`;
-  if (msId.startsWith('ms-plt')) renderPlanteo();
-  else renderComparativo();
+  if (msId === 'ms-ant' || msId === 'ms-sit') {
+    updateCmpCategorias();
+    renderComparativo();
+  } else if (msId.startsWith('ms-plt')) {
+    renderPlanteo();
+  } else if (msId.startsWith('ms-ci')) {
+    renderCosto();
+  } else if (msId.startsWith('ms-mb')) {
+    renderMargen();
+  } else {
+    renderComparativo();
+  }
 }
 function refreshMsBtn(msId, btnId) {
   const sel = getMsSelected(msId);
@@ -978,9 +1591,15 @@ function refreshMsBtn(msId, btnId) {
   const isSit = msId.includes('sit');
   if (sel.length === 0 || sel.length === total) btn.textContent = isSit ? `Todas (${total})` : `Todos (${total})`;
   else btn.textContent = sel.length === 1 ? sel[0] : `${sel.length} seleccionados`;
-  // Trigger render for the right tab
-  if (msId.startsWith('ms-plt')) renderPlanteo();
-  else renderComparativo();
+  // Si cambia ant o sit en comparativo → recalcular categorías en cascada
+  if (msId === 'ms-ant' || msId === 'ms-sit') {
+    updateCmpCategorias();
+    renderComparativo();
+  } else if (msId.startsWith('ms-plt')) {
+    renderPlanteo();
+  } else {
+    renderComparativo();
+  }
 }
 function buildMs(msId, btnId, items, placeholder) {
   const ms = document.getElementById(msId);
@@ -1001,12 +1620,12 @@ function updateCmpFiltros() {
     // ms-ant: "Todos" checkbox + individuales
     const msAnt = document.getElementById('ms-ant');
     msAnt.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-ant-all" onchange="toggleMsAll('ms-ant','ms-ant-btn','ms-ant-all','Todos')"> <em>Todos</em></label>`
-      + ants.map(a => `<label class="ms-item"><input type="checkbox" value="${a}" onchange="refreshMsBtn('ms-ant','ms-ant-btn')">${a}</label>`).join('');
+      + ants.map(a => `<label class="ms-item"><input type="checkbox" value="${a}" onchange="refreshMsBtn('ms-ant','ms-ant-btn')">${U(a)}</label>`).join('');
     document.getElementById('ms-ant-btn').textContent = `Todos (${ants.length})`;
     // ms-sit: "Todas" checkbox + individuales
     const msSit = document.getElementById('ms-sit');
     msSit.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-sit-all" onchange="toggleMsAll('ms-sit','ms-sit-btn','ms-sit-all','Todas')"> <em>Todas</em></label>`
-      + sits.map(s => `<label class="ms-item"><input type="checkbox" value="${s}" onchange="refreshMsBtn('ms-sit','ms-sit-btn')">${s}</label>`).join('');
+      + sits.map(s => `<label class="ms-item"><input type="checkbox" value="${s}" onchange="refreshMsBtn('ms-sit','ms-sit-btn')">${U(s)}</label>`).join('');
     document.getElementById('ms-sit-btn').textContent = `Todas (${sits.length})`;
   } else {
     document.getElementById('ms-ant').innerHTML = '';
@@ -1014,6 +1633,42 @@ function updateCmpFiltros() {
     document.getElementById('ms-sit').innerHTML = '';
     document.getElementById('ms-sit-btn').textContent = 'Todas';
   }
+  updateCmpCategorias();
+  renderComparativo();
+}
+function updateCmpCategorias() {
+  // Categorías disponibles según cultivo + antecesores + situaciones actualmente seleccionados
+  const cultivo = document.getElementById('cmp-cultivo').value;
+  if (!cultivo || !OPTIONS[cultivo]) return;
+  const activs = OPTIONS[cultivo].activs;
+  const allAnts = OPTIONS[cultivo].antecesores;
+  const allSits = getSituacionesDisplay(cultivo);
+  const selAnts = getMsSelected('ms-ant');
+  const selSits = getMsSelected('ms-sit');
+  const activeAnts = selAnts.length > 0 ? selAnts : allAnts;
+  const activeSits = selSits.length > 0 ? selSits : allSits;
+
+  // Filtrar registros según cultivo + antecesores + situaciones activos
+  const recs = RECORDS.filter(r =>
+    activs.includes(r.Activ) && r['E/I'] === 'Egreso' && r.Tipo !== 'Grano' &&
+    activeAnts.some(a => antMatches(r.Antecesor, a)) &&
+    activeSits.some(s => sitMatches(r.Situacion, s))
+  );
+  const cats = [...new Set(recs.map(r => r.Categoria))].sort();
+
+  const msCmpCat = document.getElementById('ms-cmp-cat');
+  if (!msCmpCat) return;
+  // Preservar selección previa
+  const prevSel = getMsSelected('ms-cmp-cat');
+  msCmpCat.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-cmp-cat-all" onchange="toggleMsAll('ms-cmp-cat','ms-cmp-cat-btn','ms-cmp-cat-all','Todas')"> <em>Todas</em></label>`
+    + cats.map(c => {
+        const checked = prevSel.length === 0 || prevSel.includes(c) ? '' : '';
+        return `<label class="ms-item"><input type="checkbox" value="${c}" onchange="onCmpCatChange()">${c}</label>`;
+      }).join('');
+  document.getElementById('ms-cmp-cat-btn').textContent = `Todas (${cats.length})`;
+}
+function onCmpCatChange() {
+  refreshMsBtn('ms-cmp-cat', 'ms-cmp-cat-btn');
   renderComparativo();
 }
 function renderComparativo() {
@@ -1034,6 +1689,8 @@ function renderComparativo() {
   // Base records filtered by cultivo + tipo
   let baseRecs = RECORDS.filter(r => activs.includes(r.Activ) && r['E/I']==='Egreso' && r.Tipo!=='Grano');
   if (tipo) baseRecs = baseRecs.filter(r => r.Tipo === tipo);
+  const selCats = getMsSelected('ms-cmp-cat');
+  if (selCats.length > 0) baseRecs = baseRecs.filter(r => selCats.includes(r.Categoria));
 
   // Determine columns and filter axis based on pivot
   let cols, colRecs;
@@ -1069,8 +1726,7 @@ function renderComparativo() {
         rowOrder.push(k);
       }
       rowMap[k].cats.add(r.Categoria);
-      const _gk = `${r['Nro Registro']}|${r.Fecha}|${r['Produc/labor']}`;
-      rowMap[k].bySit[sit] = dosisOverrides[_gk] != null ? dosisOverrides[_gk] : r.Dosis;
+      rowMap[k].bySit[sit] = r.Dosis;
     }
   }
   // sort by fecha then Orden de Carga then prod
@@ -1094,12 +1750,42 @@ function renderComparativo() {
   }
 
   const nCols = 3 + cols.length;
-  let html = `<p style="margin-bottom:10px;color:#666;font-size:12px">${rows.length} ítems · ${cols.length} situaciones comparadas</p>
-  <div class="pivot-table"><table class="tbl-prod">
-    <thead><tr>
-      <th>Producto / Labor</th><th>Tipo</th><th>Unidad</th>
-      ${cols.map(s=>`<th>${s}</th>`).join('')}
-    </tr></thead><tbody>`;
+  // Anchos fijos: Producto 35%, Tipo 12%, Unidad 9%, resto repartido igual entre columnas de datos
+  const fixedTotal = 35 + 12 + 9; // = 56%
+  const dataPct = (44 / Math.max(cols.length, 1)).toFixed(2);
+  const colgroup = `<colgroup>
+    <col style="width:35%">
+    <col style="width:12%">
+    <col style="width:9%">
+    ${cols.map(() => `<col style="width:${dataPct}%">`).join('')}
+  </colgroup>`;
+
+  // Header sticky: tabla separada, posicionada sticky debajo del filtro
+  // Body: tabla con overflow-x scroll pero con mismos anchos de columna
+  let html = `<p style="margin-bottom:6px;color:#666;font-size:12px">${rows.length} ítems · ${cols.length} ${cmpPivot === 'sit' ? 'situaciones' : 'antecesores'} comparados</p>`;
+
+  // Ancho mínimo absoluto para que el header sticky sincronice correctamente
+  const minTableWidth = Math.max(700, 400 + cols.length * 120);
+
+  // ── Encabezado sticky (fuera del overflow-x) ──
+  html += `<div class="cmp-thead-sticky" id="cmp-thead-sticky">
+    <table class="tbl-prod" style="table-layout:fixed;min-width:${minTableWidth}px;margin-bottom:0;border-radius:6px 6px 0 0;box-shadow:none">
+      ${colgroup}
+      <thead><tr>
+        <th style="text-align:left;border-radius:6px 0 0 0">Producto / Labor</th>
+        <th>Tipo</th>
+        <th>Unidad</th>
+        ${cols.map((s,i) => `<th style="text-align:right${i===cols.length-1?';border-radius:0 6px 0 0':''}">${U(s)}</th>`).join('')}
+      </tr></thead>
+    </table>
+  </div>`;
+
+  // ── Cuerpo con scroll horizontal ──
+  html += `<div class="cmp-body-scroll" id="cmp-body-scroll">
+    <table class="tbl-prod" style="table-layout:fixed;min-width:${minTableWidth}px;border-radius:0 0 6px 6px">
+      ${colgroup}
+      <tbody>`;
+
   for (const sk of sectionOrder) {
     const sec = sectionMap[sk];
     html += `<tr style="background:var(--verde-bg)">
@@ -1112,12 +1798,22 @@ function renderComparativo() {
         <td><strong>${r.prod}</strong></td>
         <td>${tipoBadge(r.tipo)}</td>
         <td>${r.unidad}</td>
-        ${cols.map(s => r.bySit[s] != null ? `<td><strong>${fmtNumAuto(r.bySit[s])}</strong></td>` : `<td style="color:#bbb">—</td>`).join('')}
+        ${cols.map(s => r.bySit[s] != null ? `<td style="text-align:right"><strong>${fmtNumAuto(r.bySit[s])}</strong></td>` : `<td style="color:#bbb;text-align:right">—</td>`).join('')}
       </tr>`;
     }
   }
   html += `</tbody></table></div>`;
   wrap.innerHTML = html;
+
+  // Sincronizar scroll horizontal del body con el header
+  const bodyScroll = document.getElementById('cmp-body-scroll');
+  const headSticky = document.getElementById('cmp-thead-sticky');
+  if (bodyScroll && headSticky) {
+    bodyScroll.addEventListener('scroll', () => {
+      headSticky.scrollLeft = bodyScroll.scrollLeft;
+    });
+  }
+  setTimeout(updateStickyTop, 30);
 }
 
 // ============================================================
@@ -1185,11 +1881,10 @@ function renderInsumos() {
     html += `<td>${prec !== null ? 'u$s '+fmtNumAuto(prec) : '<span class="costo-na">—</span>'}</td>`;
     html += `<td>${fmtCosto(costo)}</td></tr>`;
   }
-  // total row
+  // total row — columnas de cantidad no se suman (diferentes unidades), solo se muestra costo total u$s
   html += `<tr class="total-row"><td colspan="3"><strong>TOTAL</strong></td>`;
-  let gt = 0;
-  for (const cv of cultivos) { html += `<td><strong>${fmtNumAuto(totals[cv]||0)}</strong></td>`; gt += totals[cv]||0; }
-  html += `<td><strong>${fmtNumAuto(gt)}</strong></td><td></td><td>${fmtCosto(totalCostoIns)}</td></tr>`;
+  for (const cv of cultivos) { html += `<td style="color:#aaa;font-size:11px">—</td>`; }
+  html += `<td style="color:#aaa;font-size:11px">—</td><td></td><td>${fmtCosto(totalCostoIns)}</td></tr>`;
   html += `</tbody></table>`;
   wrap.innerHTML = html;
 }
@@ -1281,26 +1976,37 @@ function exportXLSX(tipo) {
   let data = [];
   if (tipo === 'insumos') {
     const cultivos = [...new Set(superficies.map(s=>s.cultivo))];
-    data.push(['Producto/Labor','Tipo','Unidad',...cultivos,'TOTAL']);
+    // Header: cols por cultivo + total cantidad + u$s/unidad + costo total u$s
+    data.push(['Producto/Labor','Tipo','Unidad',...cultivos,'Total Unidades','u$s/unidad','Costo Total u$s']);
+    let grandTotalUsd = 0;
     for (const r of _lastInsumos) {
-      data.push([r.prod, r.tipo, r.unidad, ...cultivos.map(c=>r.byCultivo[c]||0), r.total]);
+      const prec = getPrecio(r.prod, r.unidad);
+      const costoUsd = prec !== null ? prec * r.total : '';
+      if (prec !== null) grandTotalUsd += costoUsd;
+      data.push([r.prod, r.tipo, r.unidad, ...cultivos.map(c=>r.byCultivo[c]||0), r.total, prec !== null ? prec : '', costoUsd]);
     }
-    data.push(['TOTAL','','', ...cultivos.map(c=>_lastInsumos.reduce((s,r)=>s+(r.byCultivo[c]||0),0)), _lastInsumos.reduce((s,r)=>s+r.total,0)]);
+    // Fila de total: solo costo total u$s (no sumas de cantidades con distintas unidades)
+    data.push(['TOTAL','','', ...cultivos.map(()=>''), '', '', grandTotalUsd]);
   } else {
-    data.push(['Producto/Labor','Tipo','Unidad',..._lastMensualMonths,'TOTAL']);
+    // Mensual: sin fila de totales por columna (distintas unidades)
+    data.push(['Producto/Labor','Tipo','Unidad',..._lastMensualMonths,'Total Unidades']);
     for (const r of _lastMensualRows) {
       data.push([r.prod, r.tipo, r.unidad, ..._lastMensualMonths.map(m=>r.byMes[m]||0), r.total]);
     }
-    const monthTotals = _lastMensualMonths.map(m=>_lastMensualRows.reduce((s,r)=>s+(r.byMes[m]||0),0));
-    data.push(['TOTAL','','',...monthTotals, _lastMensualRows.reduce((s,r)=>s+r.total,0)]);
+    // Sin fila de totales (no tiene sentido sumar distintas unidades)
   }
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(data);
+  // Formato numérico para columnas de costo
   XLSX.utils.book_append_sheet(wb, ws, tipo==='insumos'?'Insumos':'Mensual');
   XLSX.writeFile(wb, `SOS-2627-${tipo}.xlsx`);
 }
-function exportPDF() {
+function exportPDF(tabName) {
+  // Add print class to body to control which tab shows
+  document.body.classList.add('print-' + tabName);
   window.print();
+  // Remove class after printing dialog closes
+  setTimeout(() => document.body.classList.remove('print-' + tabName), 1000);
 }
 
 
@@ -1577,9 +2283,9 @@ function renderPorha() {
 
   // Encabezado con ha por cultivo
   let html = `<p style="margin-bottom:8px;color:#666;font-size:12px">
-    Ha consideradas: ${culActivosFiltro.map(c => `${c}: <strong>${fmtNum(haPorCultivo[c],1)} ha</strong>`).join(' · ')}
+    Ha consideradas: ${culActivosFiltro.map(c => `${U(c)}: <strong>${fmtNum(haPorCultivo[c],1)} ha</strong>`).join(' · ')}
   </p>
-  <div class="pivot-table"><table class="tbl-prod">
+  <div class="pivot-table-sticky"><table class="tbl-prod">
     <thead>
       <tr>
         <th style="min-width:160px">Insumo / Labor</th>
@@ -1621,7 +2327,7 @@ function initPorhaAnts() {
     for (const a of opts.antecesores) allAnts.add(a);
   }
   selAnt.innerHTML = '<option value=""></option>';
-  for (const a of [...allAnts].sort()) selAnt.innerHTML += `<option>${a}</option>`;
+  for (const a of [...allAnts].sort()) selAnt.innerHTML += `<option value="${a}">${U(a)}</option>`;
 }
 
 // ============================================================
@@ -1641,8 +2347,8 @@ function updateTlFiltros() {
   selAnt.innerHTML = '<option value=""></option>';
   selSit.innerHTML = '<option value=""></option>';
   if (cultivo && OPTIONS[cultivo]) {
-    for (const a of OPTIONS[cultivo].antecesores) selAnt.innerHTML += `<option>${a}</option>`;
-    for (const s of getSituacionesDisplay(cultivo)) selSit.innerHTML += `<option>${s}</option>`;
+    for (const a of OPTIONS[cultivo].antecesores) selAnt.innerHTML += `<option value="${a}">${U(a)}</option>`;
+    for (const s of getSituacionesDisplay(cultivo)) selSit.innerHTML += `<option value="${s}">${U(s)}</option>`;
   }
   renderTimeline();
 }
@@ -1729,7 +2435,7 @@ function renderTimeline() {
 
   for (const rowVal of rows) {
     const rowRecs = baseRecs.filter(r => rowFilter(r, rowVal));
-    html += `<tr><td class="tl-row-label">${rowVal}</td>`;
+    html += `<tr><td class="tl-row-label">${U(rowVal)}</td>`;
     for (const ym of months) {
       const monthRecs = rowRecs.filter(r => r.Fecha.startsWith(ym));
       if (!monthRecs.length) { html += `<td></td>`; continue; }
@@ -1761,11 +2467,37 @@ function renderTimeline() {
   wrap.innerHTML = html;
 }
 
-// init
-renderSuperficies();
-initPorhaAnts();
-updatePltFiltros();
-populateInsTipos();
+// ============================================================
+//  STICKY TOP: calcula la altura del filtro para el thead
+// ============================================================
+function updateStickyTop() {
+  const activeTab = document.querySelector('.tab-content.active');
+  if (!activeTab) return;
+  const wrap = activeTab.querySelector('.filters-sticky-wrap');
+  const h = wrap ? Math.round(wrap.getBoundingClientRect().height) : 0;
+  // Setear en el tab y en :root para que todos los selectores lo vean
+  activeTab.style.setProperty('--sticky-top', h + 'px');
+  document.documentElement.style.setProperty('--sticky-top', h + 'px');
+}
+// Recalcular cuando se renderiza comparativo o planteo
+const _origRenderComparativo = renderComparativo;
+renderComparativo = function() { _origRenderComparativo.apply(this, arguments); setTimeout(updateStickyTop, 30); };
+const _origRenderPlanteo = renderPlanteo;
+renderPlanteo = function() { _origRenderPlanteo.apply(this, arguments); setTimeout(updateStickyTop, 30); };
+// Recalcular si el filtro cambia de tamaño (flex wrap)
+if (window.ResizeObserver) {
+  const _stickyObs = new ResizeObserver(() => updateStickyTop());
+  document.querySelectorAll('.filters-sticky-wrap').forEach(el => _stickyObs.observe(el));
+}
+// Llamar al cambio de tab
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => setTimeout(updateStickyTop, 80));
+});
+
+// init: mostrar pantalla de login (app arranca desde doLogin → _showApp)
+// NO se cargan datos hasta que el usuario se autentique
+setTimeout(updateStickyTop, 100);
+window.addEventListener('resize', updateStickyTop);
 // close multiselect on click outside
 document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) document.querySelectorAll('.ms-dropdown').forEach(d=>d.classList.remove('open')); });
 </script>
@@ -1797,8 +2529,10 @@ document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) doc
       <label>Cultivo</label>
       <select id="tl-cultivo" onchange="updateTlFiltros()">
         <option value="">-- seleccionar --</option>
-        <option>Trigo</option><option>Cebada</option><option>Soja</option>
-        <option>Maiz</option><option>Girasol</option><option>Maiz tardio</option><option>Maiz 2da</option><option>Soja 2da</option>
+        <option value="Trigo">TRIGO</option><option value="Cebada">CEBADA</option>
+        <option value="Soja">SOJA</option><option value="Maiz">MAÍZ</option>
+        <option value="Girasol">GIRASOL</option><option value="Maiz tardio">MAÍZ TARDÍO</option>
+        <option value="Maiz 2da">MAÍZ 2DA</option><option value="Soja 2da">SOJA 2DA</option>
       </select>
     </div>
     <div class="form-group">
@@ -1821,6 +2555,7 @@ document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) doc
       </div>
     </div>
   </div>
+  <div class="tl-legend" id="tl-legend" style="margin-bottom:10px"></div>
   <div id="timeline-content"></div>
   <div class="tl-popup" id="tl-popup">
     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:4px">
@@ -1830,5 +2565,486 @@ document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) doc
     <div id="tl-popup-body"></div>
   </div>
 </div>
+
+<!-- TAB: COSTO DE IMPLANTACIÓN -->
+<div id="tab-costo" class="tab-content" style="padding:0">
+  <div class="filters-sticky-wrap">
+  <div class="section-title" style="margin:0 0 10px">Costo de Implantación por Planteo</div>
+  <div class="filters" style="align-items:flex-end;margin-bottom:0;border:none;box-shadow:none;background:transparent">
+    <div class="form-group">
+      <label>Cultivo</label>
+      <select id="ci-cultivo" onchange="updateCiFiltros()">
+        <option value="">-- todos --</option>
+        <option value="Trigo">TRIGO</option><option value="Cebada">CEBADA</option>
+        <option value="Soja">SOJA</option><option value="Maiz">MAÍZ</option>
+        <option value="Girasol">GIRASOL</option><option value="Maiz tardio">MAÍZ TARDÍO</option>
+        <option value="Maiz 2da">MAÍZ 2DA</option><option value="Soja 2da">SOJA 2DA</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Antecesores</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-ci-ant')" type="button" id="ms-ci-ant-btn">Todos</button>
+        <div class="ms-dropdown" id="ms-ci-ant"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Situaciones</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-ci-sit')" type="button" id="ms-ci-sit-btn">Todas</button>
+        <div class="ms-dropdown" id="ms-ci-sit"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Tipo</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-ci-tipo')" type="button" id="ms-ci-tipo-btn">Todos</button>
+        <div class="ms-dropdown" id="ms-ci-tipo"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Columnas por</label>
+      <div class="pivot-toggle">
+        <button class="pivot-btn active" id="ci-pvt-sit" onclick="setCiPivot('sit')">Situación</button>
+        <button class="pivot-btn" id="ci-pvt-ant" onclick="setCiPivot('ant')">Antecesor</button>
+      </div>
+    </div>
+  </div>
+  </div>
+  <div id="costo-content" style="padding:14px"></div>
+</div>
+
+<!-- TAB: MARGEN BRUTO -->
+<div id="tab-margen" class="tab-content" style="padding:0">
+  <div class="filters-sticky-wrap">
+  <div class="section-title" style="margin:0 0 10px">Margen Bruto por Cultivo</div>
+  <div class="filters" style="align-items:flex-end;margin-bottom:0;border:none;box-shadow:none;background:transparent">
+    <div class="form-group">
+      <label>Antecesores</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-mb-ant')" type="button" id="ms-mb-ant-btn">Todos</button>
+        <div class="ms-dropdown" id="ms-mb-ant"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Situaciones</label>
+      <div class="ms-wrap">
+        <button class="ms-btn" onclick="toggleMs('ms-mb-sit')" type="button" id="ms-mb-sit-btn">Todas</button>
+        <div class="ms-dropdown" id="ms-mb-sit"></div>
+      </div>
+    </div>
+  </div>
+  </div>
+  <div id="margen-content" style="padding:14px"></div>
+</div>
+
+<script>
+// ============================================================
+//  TAB: COSTO DE IMPLANTACIÓN
+// ============================================================
+let ciPivot = 'sit';
+
+function setCiPivot(v) {
+  ciPivot = v;
+  document.getElementById('ci-pvt-sit').classList.toggle('active', v === 'sit');
+  document.getElementById('ci-pvt-ant').classList.toggle('active', v === 'ant');
+  renderCosto();
+}
+
+function initCiDefaults() {
+  // Called once when tab opens - sets default state if not yet initialised
+  // Default: no cultivo filter (all cultivos shown), Soja pre-selected as antecesor
+  updateCiFiltros();
+  // Pre-check "Soja" in the global antecesor ms (only when no cultivo is selected)
+  setTimeout(() => {
+    const sel = document.getElementById('ci-cultivo').value;
+    if (!sel) {
+      // Pre-check Soja en antecesor y Base en situación
+      let changed = false;
+      document.querySelectorAll('#ms-ci-ant input[type=checkbox]').forEach(cb => {
+        if (cb.value.toLowerCase() === 'soja') { cb.checked = true; changed = true; }
+      });
+      if (changed) refreshMsBtn('ms-ci-ant', 'ms-ci-ant-btn');
+
+      let changedSit = false;
+      document.querySelectorAll('#ms-ci-sit input[type=checkbox]').forEach(cb => {
+        if (cb.value.toLowerCase() === 'base') { cb.checked = true; changedSit = true; }
+      });
+      if (changedSit) refreshMsBtn('ms-ci-sit', 'ms-ci-sit-btn');
+
+      if (changed || changedSit) renderCosto();
+    }
+  }, 50);
+}
+function updateCiFiltros() {
+  const cultivo = document.getElementById('ci-cultivo').value;
+  // Reset ms dropdowns
+  const msAnt = document.getElementById('ms-ci-ant');
+  const msSit = document.getElementById('ms-ci-sit');
+  msAnt.innerHTML = '';
+  msSit.innerHTML = '';
+  document.getElementById('ms-ci-ant-btn').textContent = 'Todos';
+  document.getElementById('ms-ci-sit-btn').textContent = 'Todas';
+
+  if (!cultivo) {
+    // No cultivo: mostrar todos los antecesores y situaciones de todos los cultivos
+    const allAnts = [...new Set(Object.values(OPTIONS).flatMap(o => o.antecesores))].sort();
+    const allSits = [...new Set(Object.values(OPTIONS).flatMap(o => getSituacionesDisplay(Object.keys(OPTIONS).find(k=>OPTIONS[k]===o)||'')))].filter(Boolean).sort();
+    msAnt.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-ci-ant-all" onchange="toggleMsAll('ms-ci-ant','ms-ci-ant-btn','ms-ci-ant-all','Todos')"> <em>Todos</em></label>`
+      + allAnts.map(a => `<label class="ms-item"><input type="checkbox" value="${a}" onchange="refreshMsBtn('ms-ci-ant','ms-ci-ant-btn');renderCosto()">${U(a)}</label>`).join('');
+    document.getElementById('ms-ci-ant-btn').textContent = `Todos (${allAnts.length})`;
+    const allSitsFlat = [...new Set(Object.entries(OPTIONS).flatMap(([c,o]) => getSituacionesDisplay(c)))].sort();
+    msSit.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-ci-sit-all" onchange="toggleMsAll('ms-ci-sit','ms-ci-sit-btn','ms-ci-sit-all','Todas')"> <em>Todas</em></label>`
+      + allSitsFlat.map(s => `<label class="ms-item"><input type="checkbox" value="${s}" onchange="refreshMsBtn('ms-ci-sit','ms-ci-sit-btn');renderCosto()">${U(s)}</label>`).join('');
+    document.getElementById('ms-ci-sit-btn').textContent = `Todas (${allSitsFlat.length})`;
+  }
+
+  if (cultivo && OPTIONS[cultivo]) {
+    const ants = OPTIONS[cultivo].antecesores;
+    const sits = getSituacionesDisplay(cultivo);
+    msAnt.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-ci-ant-all" onchange="toggleMsAll('ms-ci-ant','ms-ci-ant-btn','ms-ci-ant-all','Todos')"> <em>Todos</em></label>`
+      + ants.map(a => `<label class="ms-item"><input type="checkbox" value="${a}" onchange="refreshMsBtn('ms-ci-ant','ms-ci-ant-btn');renderCosto()">${U(a)}</label>`).join('');
+    document.getElementById('ms-ci-ant-btn').textContent = `Todos (${ants.length})`;
+    msSit.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-ci-sit-all" onchange="toggleMsAll('ms-ci-sit','ms-ci-sit-btn','ms-ci-sit-all','Todas')"> <em>Todas</em></label>`
+      + sits.map(s => `<label class="ms-item"><input type="checkbox" value="${s}" onchange="refreshMsBtn('ms-ci-sit','ms-ci-sit-btn');renderCosto()">${U(s)}</label>`).join('');
+    document.getElementById('ms-ci-sit-btn').textContent = `Todas (${sits.length})`;
+  } else {
+    // Sin cultivo seleccionado: no hay filtros de ant/sit
+  }
+
+  // Tipo multiselect
+  const tipos = ['Coadyuvante','Fertilizante','Fungicida','Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra','Cosecha'];
+  const msTipo = document.getElementById('ms-ci-tipo');
+  msTipo.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-ci-tipo-all" onchange="toggleMsAll('ms-ci-tipo','ms-ci-tipo-btn','ms-ci-tipo-all','Todos')"> <em>Todos</em></label>`
+    + tipos.map(t => `<label class="ms-item"><input type="checkbox" value="${t}" onchange="refreshMsBtn('ms-ci-tipo','ms-ci-tipo-btn');renderCosto()">${t}</label>`).join('');
+  document.getElementById('ms-ci-tipo-btn').textContent = `Todos (${tipos.length})`;
+
+  renderCosto();
+}
+
+function renderCosto() {
+  const cultivo = document.getElementById('ci-cultivo').value;
+  const wrap = document.getElementById('costo-content');
+  const selAnts = getMsSelected('ms-ci-ant');
+  const selSits = getMsSelected('ms-ci-sit');
+  const selTipos = getMsSelected('ms-ci-tipo');
+
+  const CULTIVOS_ALL = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da'];
+
+  if (!cultivo) {
+    // Sin cultivo: columnas = cultivos, filtrar por ant/sit seleccionados
+    const colData = {};
+    const allTipos = new Set();
+    const cols = CULTIVOS_ALL;
+
+    for (const cv of cols) {
+      colData[cv] = {};
+      const activs = OPTIONS[cv]?.activs || [];
+      const allAnts = OPTIONS[cv]?.antecesores || [];
+      const allSits = getSituacionesDisplay(cv);
+      const activeAnts = selAnts.length > 0 ? selAnts.filter(a => allAnts.includes(a)) : allAnts;
+      const activeSits = selSits.length > 0 ? selSits.filter(s => allSits.includes(s)) : allSits;
+      if (!activeAnts.length || !activeSits.length) continue;
+
+      let recs = RECORDS.filter(r =>
+        activs.includes(normActiv(r.Activ)) &&
+        r['E/I'] === 'Egreso' &&
+        r.Tipo !== 'Grano' &&
+        activeAnts.some(a => antMatches(r.Antecesor, a)) &&
+        activeSits.some(s => sitMatches(r.Situacion, s))
+      );
+      if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
+
+      for (const r of recs) {
+        const precio = getPrecio(r['Produc/labor'], r.Unidad);
+        if (precio === null) continue;
+        if (!colData[cv][r.Tipo]) colData[cv][r.Tipo] = 0;
+        colData[cv][r.Tipo] += precio * r.Dosis;
+        allTipos.add(r.Tipo);
+      }
+    }
+
+    const tipoOrder = ['Coadyuvante','Fertilizante','Fungicida','Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra','Cosecha'];
+    let tipos = tipoOrder.filter(t => allTipos.has(t));
+    if (selTipos.length > 0) tipos = tipoOrder.filter(t => selTipos.includes(t) && allTipos.has(t));
+
+    if (!tipos.length) { wrap.innerHTML = '<p class="empty">Sin datos para los filtros seleccionados.</p>'; return; }
+
+    const dataPct = (80 / Math.max(cols.length, 1)).toFixed(2);
+    const colgroup = `<colgroup><col style="width:20%">${cols.map(() => `<col style="width:${dataPct}%">`).join('')}</colgroup>`;
+    const filterInfo = [];
+    if (selAnts.length > 0) filterInfo.push(`Ant: ${selAnts.join(', ')}`);
+    if (selSits.length > 0) filterInfo.push(`Sit: ${selSits.join(', ')}`);
+    let html = `<p style="margin-bottom:8px;color:#666;font-size:12px">${tipos.length} tipos · todos los cultivos${filterInfo.length ? ' · ' + filterInfo.join(' · ') : ''} &nbsp;·&nbsp; <em style="color:#999">Valores en u$s/ha</em></p>`;
+    html += `<div class="table-scroll-wrap"><table class="tbl-prod" style="table-layout:fixed">${colgroup}<thead><tr>
+      <th style="text-align:left;border-radius:6px 0 0 0">Tipo</th>
+      ${cols.map((c,i) => `<th style="text-align:right${i===cols.length-1?';border-radius:0 6px 0 0':''}"><span class="badge badge-${({Trigo:'trigo',Cebada:'cebada',Soja:'soja',Maiz:'maiz',Girasol:'girasol','Maiz tardio':'tardio'})[c]||'tipo'}">${c}</span></th>`).join('')}
+    </tr></thead><tbody>`;
+    const totals = {};
+    for (const tipo of tipos) {
+      html += `<tr><td>${tipoBadge(tipo)}</td>`;
+      for (const cv of cols) {
+        const v = colData[cv][tipo];
+        html += v != null && v > 0 ? `<td style="text-align:right" class="costo-cell">u$s ${fmtNum(v,2)}</td>` : `<td style="text-align:right;color:#ccc">—</td>`;
+        if (!totals[cv]) totals[cv] = 0;
+        totals[cv] += v || 0;
+      }
+      html += `</tr>`;
+    }
+    html += `<tr class="total-row"><td><strong>TOTAL u$s/ha</strong></td>`;
+    for (const cv of cols) html += `<td style="text-align:right"><strong>u$s ${fmtNum(totals[cv]||0,2)}</strong></td>`;
+    html += `</tr></tbody></table></div>`;
+    wrap.innerHTML = html;
+    return;
+  }
+
+  // Con cultivo seleccionado: comportamiento original con pivot sit/ant
+  const activs = OPTIONS[cultivo].activs;
+  const allAnts = OPTIONS[cultivo].antecesores;
+  const allSits = getSituacionesDisplay(cultivo);
+
+  // Columnas según pivot
+  let cols;
+  if (ciPivot === 'sit') {
+    cols = selSits.length > 0 ? selSits : allSits;
+  } else {
+    cols = selAnts.length > 0 ? selAnts : allAnts;
+  }
+
+  const activeAnts = selAnts.length > 0 ? selAnts : allAnts;
+  const activeSits = selSits.length > 0 ? selSits : allSits;
+
+  // Construir mapa: col -> tipo -> costoTotal/ha
+  const colData = {}; // col -> tipo -> usd_ha
+  const allTipos = new Set();
+
+  for (const col of cols) {
+    colData[col] = {};
+    const filterAnts = ciPivot === 'sit' ? activeAnts : [col];
+    const filterSits = ciPivot === 'sit' ? [col] : activeSits;
+
+    let recs = RECORDS.filter(r =>
+      activs.includes(normActiv(r.Activ)) &&
+      r['E/I'] === 'Egreso' &&
+      r.Tipo !== 'Grano' &&
+      filterAnts.some(a => antMatches(r.Antecesor, a)) &&
+      filterSits.some(s => sitMatches(r.Situacion, s))
+    );
+
+    if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
+
+    for (const r of recs) {
+      const precio = getPrecio(r['Produc/labor'], r.Unidad);
+      if (precio === null) continue;
+      const costoHa = precio * r.Dosis;
+      if (!colData[col][r.Tipo]) colData[col][r.Tipo] = 0;
+      colData[col][r.Tipo] += costoHa;
+      allTipos.add(r.Tipo);
+    }
+  }
+
+  if (cols.length === 0) { wrap.innerHTML = '<p class="empty">Sin columnas para mostrar.</p>'; return; }
+
+  const tipoOrder = ['Coadyuvante','Fertilizante','Fungicida','Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra','Cosecha'];
+  const tipos = tipoOrder.filter(t => allTipos.has(t));
+  if (selTipos.length > 0) tipos.splice(0, tipos.length, ...tipoOrder.filter(t => selTipos.includes(t) && allTipos.has(t)));
+
+  if (!tipos.length) { wrap.innerHTML = '<p class="empty">Sin datos de costo para los filtros seleccionados.</p>'; return; }
+
+  const dataPct = (80 / Math.max(cols.length, 1)).toFixed(2);
+  const colgroup = `<colgroup><col style="width:20%">${cols.map(() => `<col style="width:${dataPct}%">`).join('')}</colgroup>`;
+
+  let html = `<div class="table-scroll-wrap">
+  <table class="tbl-prod" style="table-layout:fixed">
+    ${colgroup}
+    <thead><tr>
+      <th style="text-align:left;border-radius:6px 0 0 0">Tipo</th>
+      ${cols.map((c, i) => `<th style="text-align:right${i===cols.length-1?';border-radius:0 6px 0 0':''}">${U(c)}</th>`).join('')}
+    </tr></thead>
+    <tbody>`;
+
+  const totals = {};
+  for (const tipo of tipos) {
+    html += `<tr><td>${tipoBadge(tipo)}</td>`;
+    for (const col of cols) {
+      const v = colData[col][tipo];
+      html += v != null && v > 0 ? `<td style="text-align:right" class="costo-cell">u$s ${fmtNum(v,2)}</td>` : `<td style="text-align:right;color:#ccc">—</td>`;
+      if (!totals[col]) totals[col] = 0;
+      totals[col] += v || 0;
+    }
+    html += `</tr>`;
+  }
+
+  // Fila de totales
+  html += `<tr class="total-row"><td><strong>TOTAL u$s/ha</strong></td>`;
+  for (const col of cols) {
+    const t = totals[col] || 0;
+    html += `<td style="text-align:right"><strong>u$s ${fmtNum(t,2)}</strong></td>`;
+  }
+  html += `</tr></tbody></table></div>`;
+
+  const label = ciPivot === 'sit' ? 'situación' : 'antecesor';
+  html = `<p style="margin-bottom:8px;color:#666;font-size:12px">${tipos.length} tipos · ${cols.length} ${label === 'situación' ? 'situaciones' : 'antecesores'} comparados &nbsp;·&nbsp; <em style="color:#999">Valores en u$s/ha</em></p>` + html;
+
+  wrap.innerHTML = html;
+}
+
+// ============================================================
+//  TAB: MARGEN BRUTO
+// ============================================================
+
+function initMbFiltros() {
+  // Populate antecesores y situaciones a partir de todas las superficies definidas
+  const allAnts = [...new Set(RECORDS.filter(r=>r.Antecesor.toLowerCase()!=='todos').flatMap(r=>r.Antecesor.split(/\s+o\s+|,\s*|\s+y\s+/).map(s=>s.trim()).filter(Boolean)))].sort();
+  const allSits = [...new Set(RECORDS.filter(r=>r.Situacion.toLowerCase()!=='todas').flatMap(r=>r.Situacion.split(/\s+o\s+|,\s*|\s+y\s+/).map(s=>s.trim()).filter(Boolean)))].sort();
+
+  const msAnt = document.getElementById('ms-mb-ant');
+  msAnt.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-mb-ant-all" onchange="toggleMsAll('ms-mb-ant','ms-mb-ant-btn','ms-mb-ant-all','Todos')"> <em>Todos</em></label>`
+    + allAnts.map(a => `<label class="ms-item"><input type="checkbox" value="${a}" onchange="refreshMsBtn('ms-mb-ant','ms-mb-ant-btn');renderMargen()">${U(a)}</label>`).join('');
+  document.getElementById('ms-mb-ant-btn').textContent = `Todos (${allAnts.length})`;
+
+  const msSit = document.getElementById('ms-mb-sit');
+  msSit.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-mb-sit-all" onchange="toggleMsAll('ms-mb-sit','ms-mb-sit-btn','ms-mb-sit-all','Todas')"> <em>Todas</em></label>`
+    + allSits.map(s => `<label class="ms-item"><input type="checkbox" value="${s}" onchange="refreshMsBtn('ms-mb-sit','ms-mb-sit-btn');renderMargen()">${U(s)}</label>`).join('');
+  document.getElementById('ms-mb-sit-btn').textContent = `Todas (${allSits.length})`;
+}
+
+function renderMargen() {
+  const wrap = document.getElementById('margen-content');
+  const selAnts = getMsSelected('ms-mb-ant');
+  const selSits = getMsSelected('ms-mb-sit');
+
+  const CULTIVOS = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da'];
+
+  // Calcular para cada cultivo: ingreso_ha, costo_ha, margen_ha
+  // Filtro: si hay ant/sit seleccionados, solo incluir registros que matcheen
+  // Primero chequear cuales cultivos tienen superficies definidas
+  const cultivosConSup = [...new Set(superficies.map(s=>s.cultivo))];
+
+  // Para el margen, necesitamos la superficie sembrada (filtrada)
+  // La superficie sembrada filtrada = sum de ha de superficies que matcheen ant/sit filtros
+  function haFiltrada(cultivo) {
+    let sups = superficies.filter(s => s.cultivo === cultivo);
+    if (selAnts.length > 0) sups = sups.filter(s => selAnts.includes(s.antecesor));
+    if (selSits.length > 0) sups = sups.filter(s => selSits.includes(s.situacion));
+    return sups.reduce((sum, s) => sum + s.ha, 0);
+  }
+
+  // Para calcular dólares totales (no /ha) necesitamos filtrar por superficie
+  // Ingreso: Tipo === 'Grano', E/I === 'Ingreso'
+  // Costo: E/I === 'Egreso', Tipo !== 'Grano'
+  function calcCultivoMargen(cultivo) {
+    const activs = OPTIONS[cultivo]?.activs || [];
+    if (!activs.length) return null;
+
+    // Obtener superficies filtradas
+    let sups = superficies.filter(s => s.cultivo === cultivo);
+    if (selAnts.length > 0) sups = sups.filter(s => selAnts.includes(s.antecesor));
+    if (selSits.length > 0) sups = sups.filter(s => selSits.includes(s.situacion));
+
+    const totalHa = sups.reduce((sum, s) => sum + s.ha, 0);
+    if (totalHa === 0) return null; // sin superficie
+
+    let ingresoTotal = 0, costoTotal = 0;
+    let nSinPrecioIngreso = 0, nSinPrecioCosto = 0;
+
+    for (const sup of sups) {
+      // Ingresos: registros de grano con E/I=Ingreso
+      const ingRecs = RECORDS.filter(r =>
+        activs.includes(normActiv(r.Activ)) &&
+        r['E/I'] === 'Ingreso' &&
+        r.Tipo === 'Grano' &&
+        antMatches(r.Antecesor, sup.antecesor) &&
+        sitMatches(r.Situacion, sup.situacion)
+      );
+      for (const r of ingRecs) {
+        const p = getPrecio(r['Produc/labor'], r.Unidad);
+        if (p !== null) ingresoTotal += p * r.Dosis * sup.ha;
+        else nSinPrecioIngreso++;
+      }
+
+      // Costos: egreso + no grano
+      const costoRecs = filterRecords(sup.cultivo, sup.antecesor, sup.situacion);
+      for (const r of costoRecs) {
+        const p = getPrecio(r['Produc/labor'], r.Unidad);
+        if (p !== null) costoTotal += p * r.Dosis * sup.ha;
+        else nSinPrecioCosto++;
+      }
+    }
+
+    const ingresoHa = totalHa > 0 ? ingresoTotal / totalHa : 0;
+    const costoHa = totalHa > 0 ? costoTotal / totalHa : 0;
+    const margenHa = ingresoHa - costoHa;
+
+    return { cultivo, totalHa, ingresoTotal, costoTotal, ingresoHa, costoHa, margenHa, nSinPrecioIngreso, nSinPrecioCosto };
+  }
+
+  const rows = CULTIVOS.map(c => calcCultivoMargen(c)).filter(Boolean);
+
+  if (!rows.length) {
+    if (!superficies.length) {
+      wrap.innerHTML = '<div class="no-superficies">⚠️ Primero definí las superficies en la pestaña "Superficies".</div>';
+    } else {
+      wrap.innerHTML = '<p class="empty">Sin superficies para los filtros seleccionados.</p>';
+    }
+    return;
+  }
+
+  const filtroInfo = [];
+  if (selAnts.length > 0) filtroInfo.push(`Ant: ${selAnts.map(U).join(', ')}`);
+  if (selSits.length > 0) filtroInfo.push(`Sit: ${selSits.map(U).join(', ')}`);
+
+  let html = `<p style="margin-bottom:10px;color:#666;font-size:12px">${rows.length} cultivo(s) con superficie definida${filtroInfo.length ? ' · ' + filtroInfo.join(' · ') : ''} &nbsp;·&nbsp; <em style="color:#999">Valores en u$s/ha (total u$s ÷ superficie filtrada)</em></p>`;
+
+  html += `<div class="table-scroll-wrap"><table class="tbl-prod" style="table-layout:fixed;min-width:700px">
+  <colgroup>
+    <col style="width:18%"><col style="width:12%">
+    <col style="width:17%"><col style="width:17%"><col style="width:17%">
+    <col style="width:10%"><col style="width:9%">
+  </colgroup>
+  <thead><tr>
+    <th style="text-align:left;border-radius:6px 0 0 0">Cultivo</th>
+    <th style="text-align:right">Ha (filtradas)</th>
+    <th style="text-align:right">Ingreso u$s/ha</th>
+    <th style="text-align:right">Costo u$s/ha</th>
+    <th style="text-align:right;border-radius:0 6px 0 0">Margen Bruto u$s/ha</th>
+  </tr></thead>
+  <tbody>`;
+
+  for (const r of rows) {
+    const margenColor = r.margenHa >= 0 ? '#1a5c2a' : '#c0392b';
+    const margenBg = r.margenHa >= 0 ? '#f0f9f0' : '#fdf0f0';
+    html += `<tr>
+      <td style="text-align:left">${cultivoBadge(r.cultivo)}</td>
+      <td style="text-align:right">${fmtNum(r.totalHa,1)} ha</td>
+      <td style="text-align:right;color:#0a7;font-weight:600">${r.ingresoHa > 0 ? 'u$s ' + fmtNum(r.ingresoHa,2) : '<span style="color:#ccc">—</span>'}</td>
+      <td style="text-align:right;color:#c0392b;font-weight:600">u$s ${fmtNum(r.costoHa,2)}</td>
+      <td style="text-align:right;font-weight:700;color:${margenColor};background:${margenBg}">u$s ${fmtNum(r.margenHa,2)}</td>
+    </tr>`;
+    if (r.nSinPrecioIngreso > 0 || r.nSinPrecioCosto > 0) {
+      html += `<tr><td colspan="5" style="text-align:right;font-size:10px;color:#aaa;padding:2px 10px">
+        ${r.nSinPrecioIngreso > 0 ? r.nSinPrecioIngreso + ' ítem(s) de ingreso sin precio' : ''}
+        ${r.nSinPrecioIngreso > 0 && r.nSinPrecioCosto > 0 ? ' · ' : ''}
+        ${r.nSinPrecioCosto > 0 ? r.nSinPrecioCosto + ' ítem(s) de costo sin precio' : ''}
+      </td></tr>`;
+    }
+  }
+
+  html += `</tbody></table></div>`;
+
+  // Advertencia si hay items sin precio de grano
+  const hayGranoSinPrecio = rows.some(r => r.nSinPrecioIngreso > 0);
+  if (hayGranoSinPrecio) {
+    html += `<div style="margin-top:10px;background:#fff8e8;border:1px solid #e6a817;border-radius:4px;padding:8px 12px;font-size:12px;color:#7a5800">
+      ⚠️ Algunos cultivos tienen ítems de ingreso (precio de grano) sin precio configurado. Configurá los precios de grano en la pestaña <strong>💲 Precios</strong>.
+    </div>`;
+  }
+
+  wrap.innerHTML = html;
+}
+
+// Inicializar filtros de margen al cargar
+setTimeout(() => { initMbFiltros(); }, 200);
+</script>
 </body>
 </html>
