@@ -765,7 +765,7 @@ const FERT_FOS_FINA = [
   {label:'Mezcla 7/40',        prod:'mezcla 7/40',        dosis:130},
 ];
 const FERT_FOS_SOJA = [
-  {label:'SPT',  prod:'spt', dosis:50},
+  {label:'SPT',  prod:'spt', dosis:40},
   {label:'MAP',  prod:'map', dosis:40},
 ];
 let supIdCounter = 1;
@@ -1520,9 +1520,10 @@ function renderPlanteo() {
         const dosis = getDosis(s.id, r);
         const domId = `r${s.id}_${rowIdx++}`;
         const fertList = isFertFos(r, s.cultivo) ? getFertFosList(s.cultivo) : null;
+        const fertCurrProd = (prodNameOverrides[k] || r['Produc/labor']).toLowerCase();
         const prodCell = fertList
           ? `<select class="fert-select" data-cultivo="${s.cultivo}" data-rk="${k}" data-ha="${s.ha}" data-dom-id="${domId}" onchange="onFertChange(this)">
-               ${fertList.map(o => `<option value="${o.prod}"${r['Produc/labor'].toLowerCase().includes(o.prod)?'selected':''}>${o.label}</option>`).join('')}
+               ${fertList.map(o => `<option value="${o.prod}"${fertCurrProd.includes(o.prod)?'selected':''}>${o.label}</option>`).join('')}
              </select>`
           : `<strong>${r['Produc/labor']}</strong>`;
         const prodForPrice = prodNameOverrides[k] || r['Produc/labor'];
