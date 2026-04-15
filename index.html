@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Presupuesto SOS Agro 26-27</title>
-<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx-js-style.min.js"></script>
+<script src="https://unpkg.com/xlsx-js-style@1.2.0/dist/xlsx-js-style.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
@@ -2064,8 +2064,7 @@ function _fillMergeRow(ws, row, cols, style) {
   }
 }
 
-function exportXLSX(tipo) {
-  const wb = XLSX.utils.book_new();
+function _exportXLSX_styled(tipo) {
   const ws = {};
   const merges = [];
   let rowIdx = 0;
@@ -2156,10 +2155,8 @@ function exportXLSX(tipo) {
       ...cultivos.map(() => ({ wch: 14 })),
       { wch: 14 }, { wch: 14 }, { wch: 16 }
     ];
-    // ── Altura de filas ─────────────────────────────────────
-    ws['!rows'] = [{ hpt: 22 }, { hpt: 30 }]; // título + header
-    // ── Freeze encabezados ──────────────────────────────────
-    ws['!freeze'] = { xSplit: 0, ySplit: 2, topLeftCell: 'A3', activeCell: 'A3', sqref: 'A3' };
+    ws['!rows'] = [{ hpt: 22 }, { hpt: 30 }];
+    ws['!views'] = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }];
 
   } else {
     // ── MENSUAL ─────────────────────────────────────────────
@@ -2218,12 +2215,53 @@ function exportXLSX(tipo) {
 
     ws['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 10 }, ...months.map(() => ({ wch: 13 })), { wch: 13 }];
     ws['!rows'] = [{ hpt: 22 }, { hpt: 30 }];
-    ws['!freeze'] = { xSplit: 0, ySplit: 2, topLeftCell: 'A3', activeCell: 'A3', sqref: 'A3' };
+    ws['!views'] = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }];
   }
 
   ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowIdx - 1, c: 30 } });
   if (merges.length) ws['!merges'] = merges;
 
+  XLSX.utils.book_append_sheet(wb, ws, tipo === 'insumos' ? 'Insumos' : 'Mensual');
+  XLSX.writeFile(wb, `SOS-2627-${tipo === 'insumos' ? 'Insumos' : 'Mensual'}.xlsx`);
+}
+
+// Fallback a export simple si xlsx-js-style no está disponible o falla
+function exportXLSX(tipo) {
+  // Verificar que la librería cargó correctamente
+  if (typeof XLSX === 'undefined') {
+    alert('La librería de exportación no cargó. Verificá tu conexión a internet e intentá de nuevo.');
+    return;
+  }
+  try {
+    _exportXLSX_styled(tipo);
+  } catch(e) {
+    console.warn('Export con estilos falló, usando modo básico:', e);
+    _exportXLSX_basico(tipo);
+  }
+}
+
+function _exportXLSX_basico(tipo) {
+  let data = [];
+  if (tipo === 'insumos') {
+    const cultivos = [...new Set(superficies.map(s=>s.cultivo))];
+    data.push(['Producto/Labor','Tipo','Unidad',...cultivos,'Total Unidades','u$s/unidad','Costo Total u$s']);
+    let grandTotalUsd = 0;
+    for (const r of _lastInsumos) {
+      const prec = getPrecio(r.prod, r.unidad);
+      const costoUsd = prec !== null ? prec * r.total : '';
+      if (prec !== null) grandTotalUsd += Number(costoUsd);
+      data.push([r.prod, r.tipo, r.unidad, ...cultivos.map(c=>r.byCultivo[c]||0), r.total, prec !== null ? prec : '', costoUsd]);
+    }
+    data.push(['TOTAL','','', ...cultivos.map(()=>''), '', '', grandTotalUsd]);
+  } else {
+    data.push(['Producto/Labor','Tipo','Unidad',..._lastMensualMonths,'Total']);
+    for (const r of _lastMensualRows) {
+      data.push([r.prod, r.tipo, r.unidad, ..._lastMensualMonths.map(m=>r.byMes[m]||0), r.total]);
+    }
+  }
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 10 }];
   XLSX.utils.book_append_sheet(wb, ws, tipo === 'insumos' ? 'Insumos' : 'Mensual');
   XLSX.writeFile(wb, `SOS-2627-${tipo === 'insumos' ? 'Insumos' : 'Mensual'}.xlsx`);
 }
