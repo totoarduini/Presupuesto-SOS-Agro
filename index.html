@@ -2193,18 +2193,24 @@ function renderPrecios() {
 //  TAB: INSUMOS POR HA
 // ============================================================
 function updatePorhaFiltros() {
-  // Cultivo seleccionado → poblar antecesores disponibles en las superficies
+  // Cultivo seleccionado → poblar antecesores desde OPTIONS (igual que Comparativo)
   const fCultivo = document.getElementById('porha-cultivo').value;
   const selAnt = document.getElementById('porha-antecesor');
   const selSit = document.getElementById('porha-situacion');
 
-  // Antecesores: de las superficies que matchean el cultivo seleccionado
-  const ants = [...new Set(
-    superficies
-      .filter(s => !fCultivo || s.cultivo === fCultivo)
-      .map(s => s.antecesor)
-      .filter(Boolean)
-  )].sort();
+  // Antecesores: de OPTIONS para el cultivo seleccionado
+  // Si no hay cultivo seleccionado, unión de antecesores de todos los cultivos presentes en superficies
+  let ants = [];
+  if (fCultivo && OPTIONS[fCultivo]) {
+    ants = [...OPTIONS[fCultivo].antecesores].sort();
+  } else {
+    const cultivos = [...new Set(superficies.map(s => s.cultivo))];
+    const antSet = new Set();
+    for (const c of cultivos) {
+      if (OPTIONS[c]) OPTIONS[c].antecesores.forEach(a => antSet.add(a));
+    }
+    ants = [...antSet].sort();
+  }
 
   selAnt.innerHTML = '<option value=""></option>';
   for (const a of ants) selAnt.innerHTML += `<option value="${a}">${U(a)}</option>`;
@@ -2216,17 +2222,23 @@ function updatePorhaFiltros() {
 }
 
 function updatePorhaAntecesorFiltro() {
-  // Antecesor seleccionado → poblar situaciones de las superficies que matchean cultivo+antecesor
+  // Antecesor seleccionado → poblar situaciones desde OPTIONS (igual que Comparativo)
   const fCultivo  = document.getElementById('porha-cultivo').value;
   const fAnt      = document.getElementById('porha-antecesor').value;
   const selSit    = document.getElementById('porha-situacion');
 
-  const sits = [...new Set(
-    superficies
-      .filter(s => (!fCultivo || s.cultivo === fCultivo) && (!fAnt || s.antecesor.toLowerCase() === fAnt.toLowerCase()))
-      .map(s => s.situacion)
-      .filter(Boolean)
-  )].sort();
+  // Situaciones: de OPTIONS para el cultivo seleccionado
+  let sits = [];
+  if (fCultivo && OPTIONS[fCultivo]) {
+    sits = getSituacionesDisplay(fCultivo);
+  } else {
+    const cultivos = [...new Set(superficies.map(s => s.cultivo))];
+    const sitSet = new Set();
+    for (const c of cultivos) {
+      if (OPTIONS[c]) getSituacionesDisplay(c).forEach(s => sitSet.add(s));
+    }
+    sits = [...sitSet].sort();
+  }
 
   selSit.innerHTML = '<option value=""></option>';
   for (const s of sits) selSit.innerHTML += `<option value="${s}">${U(s)}</option>`;
