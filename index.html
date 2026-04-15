@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Presupuesto SOS Agro 26-27</title>
-<script src="https://unpkg.com/xlsx-js-style@1.2.0/dist/xlsx-js-style.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 :root {
@@ -1998,278 +1998,158 @@ function renderMensual() {
 //  EXPORT XLSX + PDF
 // ============================================================
 
-// ── Helpers de estilo ────────────────────────────────────────
-function _xlCell(v, s) { return { v, t: typeof v === 'number' ? 'n' : 's', s }; }
-function _xlNum(v, fmt, s) { return { v: v === '' || v === null || v === undefined ? '' : Number(v), t: v === '' || v === null || v === undefined ? 's' : 'n', z: fmt || '#,##0.00', s }; }
-
-const XL_VERDE     = '1E4D1E';
-const XL_VERDE_CLR = '4A9A4A';
-const XL_VERDE_BG  = 'F0F7F0';
-const XL_TIPO_BG   = 'DFF0DF';
-const XL_TOTAL_BG  = 'C8E6C8';
-const XL_BLANCO    = 'FFFFFF';
-const XL_GRIS_TXT  = '555555';
-
-function _border() {
-  const thin = { style: 'thin', color: { rgb: 'B5D5B5' } };
-  return { top: thin, bottom: thin, left: thin, right: thin };
-}
-
-// Estilo encabezado principal (verde oscuro, texto blanco, negrita)
-function _sHdr(center) {
-  return { font: { bold: true, color: { rgb: XL_BLANCO }, sz: 11 },
-    fill: { fgColor: { rgb: XL_VERDE } },
-    alignment: { horizontal: center ? 'center' : 'left', vertical: 'center', wrapText: true },
-    border: _border() };
-}
-// Estilo título de sección/tipo (verde claro, negrita)
-function _sTipo() {
-  return { font: { bold: true, color: { rgb: '1A5C2A' }, sz: 10 },
-    fill: { fgColor: { rgb: XL_TIPO_BG } },
-    alignment: { horizontal: 'left', vertical: 'center' },
-    border: _border() };
-}
-// Estilo celda dato normal
-function _sData(right) {
-  return { font: { sz: 10 },
-    alignment: { horizontal: right ? 'right' : 'left', vertical: 'center' },
-    border: _border() };
-}
-// Estilo número
-function _sNum(color) {
-  return { font: { sz: 10, color: color ? { rgb: color } : undefined },
-    alignment: { horizontal: 'right', vertical: 'center' },
-    border: _border() };
-}
-// Estilo fila TOTAL
-function _sTotal(right) {
-  return { font: { bold: true, sz: 10, color: { rgb: '1A5C2A' } },
-    fill: { fgColor: { rgb: XL_TOTAL_BG } },
-    alignment: { horizontal: right ? 'right' : 'left', vertical: 'center' },
-    border: _border() };
-}
-// Estilo título de pestaña (cabecera del archivo)
-function _sTitulo() {
-  return { font: { bold: true, sz: 13, color: { rgb: XL_BLANCO } },
-    fill: { fgColor: { rgb: XL_VERDE } },
-    alignment: { horizontal: 'left', vertical: 'center' } };
-}
-
-// Escribe un rango de celdas vacías con estilo (para merge rows)
-function _fillMergeRow(ws, row, cols, style) {
-  for (let c = 0; c < cols; c++) {
-    const addr = XLSX.utils.encode_cell({ r: row, c });
-    if (!ws[addr]) ws[addr] = { v: '', t: 's', s: style };
-    else ws[addr].s = style;
-  }
-}
-
-function _exportXLSX_styled(tipo) {
-  const ws = {};
-  const merges = [];
-  let rowIdx = 0;
-
-  const empresaLabel = isAdmin
-    ? (adminEmpresaFilter || 'ADMIN — todas las empresas')
-    : (currentEmpresa || '');
-  const fechaLabel = new Date().toLocaleDateString('es-AR');
-
-  if (tipo === 'insumos') {
-    const cultivos = [...new Set(superficies.map(s => s.cultivo))];
-    const nCols = 3 + cultivos.length + 3; // prod+tipo+unid + cultivos + totalUnd + precio + costoUsd
-
-    // ── Fila título ──────────────────────────────────────────
-    ws[XLSX.utils.encode_cell({ r: rowIdx, c: 0 })] = _xlCell(
-      `SOS Agro — Resumen Insumos y Labores | ${empresaLabel} | ${fechaLabel}`, _sTitulo());
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: nCols - 1 } });
-    _fillMergeRow(ws, rowIdx, nCols, _sTitulo());
-    rowIdx++;
-
-    // ── Fila encabezados ────────────────────────────────────
-    const hdrs = ['Producto / Labor', 'Tipo', 'Unidad',
-      ...cultivos, 'Total Unidades', 'u$s / Unidad', 'Costo Total u$s'];
-    hdrs.forEach((h, c) => {
-      ws[XLSX.utils.encode_cell({ r: rowIdx, c })] = _xlCell(h, _sHdr(c >= 3));
-    });
-    rowIdx++;
-
-    // ── Filas de datos, agrupadas por tipo ──────────────────
-    const tipoOrder = ['Cosecha','Coadyuvante','Fertilizante','Fungicida',
-      'Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra'];
-    const byTipo = {};
-    for (const r of _lastInsumos) {
-      if (!byTipo[r.tipo]) byTipo[r.tipo] = [];
-      byTipo[r.tipo].push(r);
-    }
-    const tiposSorted = Object.keys(byTipo).sort((a, b) => {
-      const ia = tipoOrder.indexOf(a), ib = tipoOrder.indexOf(b);
-      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-    });
-
-    let grandTotalUsd = 0;
-
-    for (const tipo_ of tiposSorted) {
-      // Fila separador de tipo
-      ws[XLSX.utils.encode_cell({ r: rowIdx, c: 0 })] = _xlCell(`▸  ${tipo_.toUpperCase()}`, _sTipo());
-      merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: nCols - 1 } });
-      _fillMergeRow(ws, rowIdx, nCols, _sTipo());
-      rowIdx++;
-
-      for (const r of byTipo[tipo_]) {
-        const prec = getPrecio(r.prod, r.unidad);
-        const costoUsd = prec !== null ? prec * r.total : null;
-        if (costoUsd !== null) grandTotalUsd += costoUsd;
-
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 0 })] = _xlCell(r.prod, _sData(false));
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 1 })] = _xlCell(r.tipo, _sData(false));
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 2 })] = _xlCell(r.unidad, _sData(true));
-
-        cultivos.forEach((cv, ci) => {
-          const v = r.byCultivo[cv] || 0;
-          ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + ci })] = _xlNum(v > 0 ? v : '', '#,##0.####', _sNum());
-        });
-
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + cultivos.length })]     = _xlNum(r.total, '#,##0.####', _sNum());
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + cultivos.length + 1 })] = _xlNum(prec !== null ? prec : '', '"u$s "#,##0.00', _sNum('1A5C2A'));
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + cultivos.length + 2 })] = _xlNum(costoUsd !== null ? costoUsd : '', '"u$s "#,##0.00', _sNum(costoUsd !== null ? '1A5C2A' : null));
-        rowIdx++;
-      }
-    }
-
-    // ── Fila TOTAL ──────────────────────────────────────────
-    ws[XLSX.utils.encode_cell({ r: rowIdx, c: 0 })] = _xlCell('TOTAL', _sTotal(false));
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: 2 } });
-    ws[XLSX.utils.encode_cell({ r: rowIdx, c: 1 })] = _xlCell('', _sTotal(false));
-    ws[XLSX.utils.encode_cell({ r: rowIdx, c: 2 })] = _xlCell('', _sTotal(false));
-    cultivos.forEach((_, ci) => {
-      ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + ci })] = _xlCell('', _sTotal(true));
-    });
-    ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + cultivos.length })]     = _xlCell('', _sTotal(true));
-    ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + cultivos.length + 1 })] = _xlCell('', _sTotal(true));
-    ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + cultivos.length + 2 })] = _xlNum(grandTotalUsd, '"u$s "#,##0.00', _sTotal(true));
-    rowIdx++;
-
-    // ── Anchos de columna ───────────────────────────────────
-    ws['!cols'] = [
-      { wch: 32 }, { wch: 14 }, { wch: 10 },
-      ...cultivos.map(() => ({ wch: 14 })),
-      { wch: 14 }, { wch: 14 }, { wch: 16 }
-    ];
-    ws['!rows'] = [{ hpt: 22 }, { hpt: 30 }];
-    ws['!views'] = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }];
-
-  } else {
-    // ── MENSUAL ─────────────────────────────────────────────
-    const months = _lastMensualMonths;
-    const nCols = 3 + months.length + 1;
-    const mesNombres = months.map(ym => {
-      const [y, m] = ym.split('-');
-      return `${mesToNombre(parseInt(m))} ${y}`;
-    });
-
-    // Fila título
-    ws[XLSX.utils.encode_cell({ r: rowIdx, c: 0 })] = _xlCell(
-      `SOS Agro — Resumen Mensual de Insumos | ${empresaLabel} | ${fechaLabel}`, _sTitulo());
-    merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: nCols - 1 } });
-    _fillMergeRow(ws, rowIdx, nCols, _sTitulo());
-    rowIdx++;
-
-    // Fila encabezados
-    const hdrs = ['Producto / Labor', 'Tipo', 'Unidad', ...mesNombres, 'Total'];
-    hdrs.forEach((h, c) => {
-      ws[XLSX.utils.encode_cell({ r: rowIdx, c })] = _xlCell(h, _sHdr(c >= 3));
-    });
-    rowIdx++;
-
-    // Datos agrupados por tipo
-    const tipoOrder = ['Cosecha','Coadyuvante','Fertilizante','Fungicida',
-      'Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra'];
-    const byTipo = {};
-    for (const r of _lastMensualRows) {
-      if (!byTipo[r.tipo]) byTipo[r.tipo] = [];
-      byTipo[r.tipo].push(r);
-    }
-    const tiposSorted = Object.keys(byTipo).sort((a, b) => {
-      const ia = tipoOrder.indexOf(a), ib = tipoOrder.indexOf(b);
-      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-    });
-
-    for (const tipo_ of tiposSorted) {
-      ws[XLSX.utils.encode_cell({ r: rowIdx, c: 0 })] = _xlCell(`▸  ${tipo_.toUpperCase()}`, _sTipo());
-      merges.push({ s: { r: rowIdx, c: 0 }, e: { r: rowIdx, c: nCols - 1 } });
-      _fillMergeRow(ws, rowIdx, nCols, _sTipo());
-      rowIdx++;
-
-      for (const r of byTipo[tipo_]) {
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 0 })] = _xlCell(r.prod, _sData(false));
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 1 })] = _xlCell(r.tipo, _sData(false));
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 2 })] = _xlCell(r.unidad, _sData(true));
-        months.forEach((m, mi) => {
-          const v = r.byMes[m] || 0;
-          ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + mi })] = _xlNum(v > 0 ? v : '', '#,##0.####', _sNum());
-        });
-        ws[XLSX.utils.encode_cell({ r: rowIdx, c: 3 + months.length })] = _xlNum(r.total, '#,##0.####', _sNum());
-        rowIdx++;
-      }
-    }
-
-    ws['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 10 }, ...months.map(() => ({ wch: 13 })), { wch: 13 }];
-    ws['!rows'] = [{ hpt: 22 }, { hpt: 30 }];
-    ws['!views'] = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }];
-  }
-
-  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rowIdx - 1, c: 30 } });
-  if (merges.length) ws['!merges'] = merges;
-
-  XLSX.utils.book_append_sheet(wb, ws, tipo === 'insumos' ? 'Insumos' : 'Mensual');
-  XLSX.writeFile(wb, `SOS-2627-${tipo === 'insumos' ? 'Insumos' : 'Mensual'}.xlsx`);
-}
-
-// Fallback a export simple si xlsx-js-style no está disponible o falla
 function exportXLSX(tipo) {
-  // Verificar que la librería cargó correctamente
   if (typeof XLSX === 'undefined') {
     alert('La librería de exportación no cargó. Verificá tu conexión a internet e intentá de nuevo.');
     return;
   }
-  try {
-    _exportXLSX_styled(tipo);
-  } catch(e) {
-    console.warn('Export con estilos falló, usando modo básico:', e);
-    _exportXLSX_basico(tipo);
-  }
-}
 
-function _exportXLSX_basico(tipo) {
-  let data = [];
-  if (tipo === 'insumos') {
-    const cultivos = [...new Set(superficies.map(s=>s.cultivo))];
-    data.push(['Producto/Labor','Tipo','Unidad',...cultivos,'Total Unidades','u$s/unidad','Costo Total u$s']);
-    let grandTotalUsd = 0;
-    for (const r of _lastInsumos) {
-      const prec = getPrecio(r.prod, r.unidad);
-      const costoUsd = prec !== null ? prec * r.total : '';
-      if (prec !== null) grandTotalUsd += Number(costoUsd);
-      data.push([r.prod, r.tipo, r.unidad, ...cultivos.map(c=>r.byCultivo[c]||0), r.total, prec !== null ? prec : '', costoUsd]);
-    }
-    data.push(['TOTAL','','', ...cultivos.map(()=>''), '', '', grandTotalUsd]);
-  } else {
-    data.push(['Producto/Labor','Tipo','Unidad',..._lastMensualMonths,'Total']);
-    for (const r of _lastMensualRows) {
-      data.push([r.prod, r.tipo, r.unidad, ..._lastMensualMonths.map(m=>r.byMes[m]||0), r.total]);
-    }
-  }
+  const tipoOrder = ['Cosecha','Coadyuvante','Fertilizante','Fungicida',
+    'Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra'];
+  const tipoIdx = t => { const i = tipoOrder.indexOf(t); return i === -1 ? 99 : i; };
+
+  const empresaLabel = isAdmin ? (adminEmpresaFilter || 'ADMIN') : (currentEmpresa || '');
+  const fechaLabel = new Date().toLocaleDateString('es-AR');
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(data);
-  ws['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 10 }];
-  XLSX.utils.book_append_sheet(wb, ws, tipo === 'insumos' ? 'Insumos' : 'Mensual');
+
+  if (tipo === 'insumos') {
+    const cultivos = [...new Set(superficies.map(s => s.cultivo))];
+    const data = [];
+
+    data.push([`SOS Agro — Resumen Insumos y Labores | ${empresaLabel} | ${fechaLabel}`]);
+    data.push(['Producto / Labor', 'Tipo', 'Unidad', ...cultivos, 'Total Unidades', 'u$s / Unidad', 'Costo Total u$s']);
+
+    const byTipo = {};
+    for (const r of _lastInsumos) {
+      if (!byTipo[r.tipo]) byTipo[r.tipo] = [];
+      byTipo[r.tipo].push(r);
+    }
+    const tiposSorted = Object.keys(byTipo).sort((a, b) => tipoIdx(a) - tipoIdx(b));
+
+    let grandTotalUsd = 0;
+    for (const t of tiposSorted) {
+      data.push([`— ${t.toUpperCase()} —`]);
+      for (const r of byTipo[t]) {
+        const prec = getPrecio(r.prod, r.unidad);
+        const costoUsd = prec !== null ? prec * r.total : null;
+        if (costoUsd !== null) grandTotalUsd += costoUsd;
+        data.push([
+          r.prod, r.tipo, r.unidad,
+          ...cultivos.map(c => r.byCultivo[c] > 0 ? r.byCultivo[c] : null),
+          r.total,
+          prec !== null ? prec : null,
+          costoUsd !== null ? costoUsd : null
+        ]);
+      }
+    }
+    data.push(['TOTAL', '', '', ...cultivos.map(() => null), null, null, grandTotalUsd]);
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const nCols = 3 + cultivos.length + 3;
+
+    ws['!cols'] = [
+      { wch: 34 }, { wch: 14 }, { wch: 10 },
+      ...cultivos.map(() => ({ wch: 13 })),
+      { wch: 14 }, { wch: 14 }, { wch: 16 }
+    ];
+    ws['!views'] = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }];
+
+    const merges = [];
+    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: nCols - 1 } });
+    let ri = 2;
+    for (const t of tiposSorted) {
+      merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: nCols - 1 } });
+      ri += 1 + byTipo[t].length;
+    }
+    merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: 2 } });
+    ws['!merges'] = merges;
+
+    // Formato numérico
+    let dr = 3;
+    for (const t of tiposSorted) {
+      dr++; // separador tipo
+      for (let i = 0; i < byTipo[t].length; i++) {
+        for (let ci = 0; ci < cultivos.length; ci++) {
+          const a = XLSX.utils.encode_cell({ r: dr, c: 3 + ci });
+          if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00##';
+        }
+        let a = XLSX.utils.encode_cell({ r: dr, c: 3 + cultivos.length });
+        if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00##';
+        a = XLSX.utils.encode_cell({ r: dr, c: 3 + cultivos.length + 1 });
+        if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00';
+        a = XLSX.utils.encode_cell({ r: dr, c: 3 + cultivos.length + 2 });
+        if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00';
+        dr++;
+      }
+    }
+    const ag = XLSX.utils.encode_cell({ r: dr, c: 3 + cultivos.length + 2 });
+    if (ws[ag] && ws[ag].t === 'n') ws[ag].z = '#,##0.00';
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Insumos');
+
+  } else {
+    const months = _lastMensualMonths;
+    const mesNombres = months.map(ym => {
+      const [y, m] = ym.split('-');
+      return `${mesToNombre(parseInt(m))} ${y}`;
+    });
+    const data = [];
+    data.push([`SOS Agro — Resumen Mensual de Insumos | ${empresaLabel} | ${fechaLabel}`]);
+    data.push(['Producto / Labor', 'Tipo', 'Unidad', ...mesNombres, 'Total']);
+
+    const byTipo = {};
+    for (const r of _lastMensualRows) {
+      if (!byTipo[r.tipo]) byTipo[r.tipo] = [];
+      byTipo[r.tipo].push(r);
+    }
+    const tiposSorted = Object.keys(byTipo).sort((a, b) => tipoIdx(a) - tipoIdx(b));
+
+    for (const t of tiposSorted) {
+      data.push([`— ${t.toUpperCase()} —`]);
+      for (const r of byTipo[t]) {
+        data.push([
+          r.prod, r.tipo, r.unidad,
+          ...months.map(m => r.byMes[m] > 0 ? r.byMes[m] : null),
+          r.total
+        ]);
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const nCols = 3 + months.length + 1;
+    ws['!cols'] = [{ wch: 34 }, { wch: 14 }, { wch: 10 }, ...months.map(() => ({ wch: 12 })), { wch: 13 }];
+    ws['!views'] = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }];
+
+    const merges = [];
+    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: nCols - 1 } });
+    let ri = 2;
+    for (const t of tiposSorted) {
+      merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: nCols - 1 } });
+      ri += 1 + byTipo[t].length;
+    }
+    ws['!merges'] = merges;
+
+    let dr = 3;
+    for (const t of tiposSorted) {
+      dr++;
+      for (let i = 0; i < byTipo[t].length; i++) {
+        for (let mi = 0; mi <= months.length; mi++) {
+          const a = XLSX.utils.encode_cell({ r: dr, c: 3 + mi });
+          if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00##';
+        }
+        dr++;
+      }
+    }
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Mensual');
+  }
+
   XLSX.writeFile(wb, `SOS-2627-${tipo === 'insumos' ? 'Insumos' : 'Mensual'}.xlsx`);
 }
+
 function exportPDF(tabName) {
-  // Add print class to body to control which tab shows
   document.body.classList.add('print-' + tabName);
   window.print();
-  // Remove class after printing dialog closes
   setTimeout(() => document.body.classList.remove('print-' + tabName), 1000);
 }
 
