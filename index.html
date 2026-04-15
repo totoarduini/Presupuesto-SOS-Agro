@@ -1995,97 +1995,231 @@ function renderMensual() {
 }
 
 // ============================================================
-//  EXPORT XLSX + PDF
+//  EXPORT XLSX + PDF  — SpreadsheetML (sin dependencias externas)
 // ============================================================
 
-function exportXLSX(tipo) {
-  if (typeof XLSX === 'undefined') {
-    alert('La librería de exportación no cargó. Verificá tu conexión a internet e intentá de nuevo.');
-    return;
-  }
+// Escapa caracteres especiales XML
+function _xe(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
+// Celda SpreadsheetML
+function _smlCell(val, styleId, type) {
+  if (val === null || val === undefined || val === '') return '<Cell ss:StyleID="' + styleId + '"><Data ss:Type="String"></Data></Cell>';
+  if (type === 'Number' || (type === undefined && typeof val === 'number')) {
+    return '<Cell ss:StyleID="' + styleId + '"><Data ss:Type="Number">' + val + '</Data></Cell>';
+  }
+  return '<Cell ss:StyleID="' + styleId + '"><Data ss:Type="String">' + _xe(val) + '</Data></Cell>';
+}
+
+function _smlMergeCell(val, styleId, mergeAcross) {
+  const ma = mergeAcross > 0 ? ' ss:MergeAcross="' + mergeAcross + '"' : '';
+  return '<Cell' + ma + ' ss:StyleID="' + styleId + '"><Data ss:Type="String">' + _xe(val) + '</Data></Cell>';
+}
+
+function _smlEmptyCell(styleId, n) {
+  let out = '';
+  for (let i = 0; i < n; i++) out += '<Cell ss:StyleID="' + styleId + '"><Data ss:Type="String"></Data></Cell>';
+  return out;
+}
+
+// Genera y descarga un .xls (SpreadsheetML)
+function _downloadSML(xml, filename) {
+  const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportXLSX(tipo) {
   const tipoOrder = ['Cosecha','Coadyuvante','Fertilizante','Fungicida',
     'Herbicida','Inoculante','Insecticida','Labor','Semilla','Siembra'];
   const tipoIdx = t => { const i = tipoOrder.indexOf(t); return i === -1 ? 99 : i; };
 
   const empresaLabel = isAdmin ? (adminEmpresaFilter || 'ADMIN') : (currentEmpresa || '');
   const fechaLabel = new Date().toLocaleDateString('es-AR');
-  const wb = XLSX.utils.book_new();
+
+  // ── ESTILOS SpreadsheetML ────────────────────────────────
+  const styles = `
+  <Styles>
+    <Style ss:ID="titulo">
+      <Font ss:Bold="1" ss:Size="13" ss:Color="#FFFFFF" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#1E4D1E" ss:Pattern="Solid"/>
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center" ss:WrapText="0"/>
+    </Style>
+    <Style ss:ID="hdr">
+      <Font ss:Bold="1" ss:Size="10" ss:Color="#FFFFFF" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#2D6A2D" ss:Pattern="Solid"/>
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#FFFFFF"/>
+      </Borders>
+    </Style>
+    <Style ss:ID="hdrL">
+      <Font ss:Bold="1" ss:Size="10" ss:Color="#FFFFFF" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#2D6A2D" ss:Pattern="Solid"/>
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center" ss:WrapText="1"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#FFFFFF"/>
+      </Borders>
+    </Style>
+    <Style ss:ID="sep">
+      <Font ss:Bold="1" ss:Size="10" ss:Color="#1A5C2A" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#DFF0DF" ss:Pattern="Solid"/>
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#B5D5B5"/>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#B5D5B5"/>
+      </Borders>
+    </Style>
+    <Style ss:ID="dat">
+      <Font ss:Size="10" ss:FontName="Segoe UI"/>
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+      </Borders>
+    </Style>
+    <Style ss:ID="datC">
+      <Font ss:Size="10" ss:FontName="Segoe UI"/>
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+      </Borders>
+    </Style>
+    <Style ss:ID="num">
+      <Font ss:Size="10" ss:FontName="Segoe UI"/>
+      <NumberFormat ss:Format="#,##0.00##"/>
+      <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+      </Borders>
+    </Style>
+    <Style ss:ID="usd">
+      <Font ss:Size="10" ss:Color="#1A5C2A" ss:FontName="Segoe UI"/>
+      <NumberFormat ss:Format="#,##0.00"/>
+      <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E0E0E0"/>
+      </Borders>
+    </Style>
+    <Style ss:ID="tot">
+      <Font ss:Bold="1" ss:Size="10" ss:Color="#1A5C2A" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#C8E6C8" ss:Pattern="Solid"/>
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#4A9A4A"/>
+      </Borders>
+    </Style>
+    <Style ss:ID="totN">
+      <Font ss:Bold="1" ss:Size="10" ss:Color="#1A5C2A" ss:FontName="Segoe UI"/>
+      <Interior ss:Color="#C8E6C8" ss:Pattern="Solid"/>
+      <NumberFormat ss:Format="#,##0.00"/>
+      <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#4A9A4A"/>
+      </Borders>
+    </Style>
+    <Style ss:ID="totE">
+      <Interior ss:Color="#C8E6C8" ss:Pattern="Solid"/>
+      <Borders>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#4A9A4A"/>
+      </Borders>
+    </Style>
+  </Styles>`;
+
+  const fmtNum = v => (v === null || v === undefined) ? '' : Number(v).toFixed(4).replace(/\.?0+$/, '');
 
   if (tipo === 'insumos') {
     const cultivos = [...new Set(superficies.map(s => s.cultivo))];
-    const data = [];
-
-    data.push([`SOS Agro — Resumen Insumos y Labores | ${empresaLabel} | ${fechaLabel}`]);
-    data.push(['Producto / Labor', 'Tipo', 'Unidad', ...cultivos, 'Total Unidades', 'u$s / Unidad', 'Costo Total u$s']);
+    const nCols = 3 + cultivos.length + 3;
+    const colWidths = [
+      '<Column ss:Width="220"/>',
+      '<Column ss:Width="90"/>',
+      '<Column ss:Width="65"/>',
+      ...cultivos.map(() => '<Column ss:Width="90"/>'),
+      '<Column ss:Width="90"/>',
+      '<Column ss:Width="90"/>',
+      '<Column ss:Width="110"/>'
+    ].join('');
 
     const byTipo = {};
     for (const r of _lastInsumos) {
       if (!byTipo[r.tipo]) byTipo[r.tipo] = [];
       byTipo[r.tipo].push(r);
     }
-    const tiposSorted = Object.keys(byTipo).sort((a, b) => tipoIdx(a) - tipoIdx(b));
+    const tiposSorted = Object.keys(byTipo).sort((a,b) => tipoIdx(a)-tipoIdx(b));
+
+    let rows = '';
+
+    // Fila título
+    rows += `<Row ss:Height="22">
+      ${_smlMergeCell('SOS Agro — Resumen Insumos y Labores  |  ${empresaLabel}  |  ${fechaLabel}', 'titulo', nCols-1)}
+    </Row>`;
+
+    // Fila encabezado
+    rows += `<Row ss:Height="28">
+      ${_smlCell('Producto / Labor','hdrL')}
+      ${_smlCell('Tipo','hdr')}
+      ${_smlCell('Unidad','hdr')}
+      ${cultivos.map(c => _smlCell(c,'hdr')).join('')}
+      ${_smlCell('Total Unidades','hdr')}
+      ${_smlCell('u$s / Unidad','hdr')}
+      ${_smlCell('Costo Total u$s','hdr')}
+    </Row>`;
 
     let grandTotalUsd = 0;
+
     for (const t of tiposSorted) {
-      data.push([`— ${t.toUpperCase()} —`]);
+      // Separador de tipo
+      rows += `<Row ss:Height="18">
+        ${_smlMergeCell('   ' + t.toUpperCase(), 'sep', nCols-1)}
+      </Row>`;
+
       for (const r of byTipo[t]) {
         const prec = getPrecio(r.prod, r.unidad);
         const costoUsd = prec !== null ? prec * r.total : null;
         if (costoUsd !== null) grandTotalUsd += costoUsd;
-        data.push([
-          r.prod, r.tipo, r.unidad,
-          ...cultivos.map(c => r.byCultivo[c] > 0 ? r.byCultivo[c] : null),
-          r.total,
-          prec !== null ? prec : null,
-          costoUsd !== null ? costoUsd : null
-        ]);
+        rows += `<Row ss:Height="16">
+          ${_smlCell(r.prod,'dat')}
+          ${_smlCell(r.tipo,'datC')}
+          ${_smlCell(r.unidad,'datC')}
+          ${cultivos.map(c => {
+            const v = r.byCultivo[c];
+            return v > 0 ? _smlCell(v,'num','Number') : _smlCell('','dat');
+          }).join('')}
+          ${_smlCell(r.total,'num','Number')}
+          ${prec !== null ? _smlCell(prec,'usd','Number') : _smlCell('','dat')}
+          ${costoUsd !== null ? _smlCell(costoUsd,'usd','Number') : _smlCell('','dat')}
+        </Row>`;
       }
     }
-    data.push(['TOTAL', '', '', ...cultivos.map(() => null), null, null, grandTotalUsd]);
 
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    const nCols = 3 + cultivos.length + 3;
+    // Fila TOTAL
+    rows += `<Row ss:Height="20">
+      ${_smlMergeCell('TOTAL','tot', 2)}
+      ${_smlEmptyCell('totE', cultivos.length + 2)}
+      ${_smlCell(grandTotalUsd,'totN','Number')}
+    </Row>`;
 
-    ws['!cols'] = [
-      { wch: 34 }, { wch: 14 }, { wch: 10 },
-      ...cultivos.map(() => ({ wch: 13 })),
-      { wch: 14 }, { wch: 14 }, { wch: 16 }
-    ];
-    ws['!views'] = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }];
-
-    const merges = [];
-    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: nCols - 1 } });
-    let ri = 2;
-    for (const t of tiposSorted) {
-      merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: nCols - 1 } });
-      ri += 1 + byTipo[t].length;
-    }
-    merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: 2 } });
-    ws['!merges'] = merges;
-
-    // Formato numérico
-    let dr = 3;
-    for (const t of tiposSorted) {
-      dr++; // separador tipo
-      for (let i = 0; i < byTipo[t].length; i++) {
-        for (let ci = 0; ci < cultivos.length; ci++) {
-          const a = XLSX.utils.encode_cell({ r: dr, c: 3 + ci });
-          if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00##';
-        }
-        let a = XLSX.utils.encode_cell({ r: dr, c: 3 + cultivos.length });
-        if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00##';
-        a = XLSX.utils.encode_cell({ r: dr, c: 3 + cultivos.length + 1 });
-        if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00';
-        a = XLSX.utils.encode_cell({ r: dr, c: 3 + cultivos.length + 2 });
-        if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00';
-        dr++;
-      }
-    }
-    const ag = XLSX.utils.encode_cell({ r: dr, c: 3 + cultivos.length + 2 });
-    if (ws[ag] && ws[ag].t === 'n') ws[ag].z = '#,##0.00';
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Insumos');
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  ${styles}
+  <Worksheet ss:Name="Insumos">
+    <Table>${colWidths}${rows}</Table>
+    <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+      <FreezePanes/>
+      <FrozenNoSplit/>
+      <SplitHorizontal>2</SplitHorizontal>
+      <TopRowBottomPane>2</TopRowBottomPane>
+      <ActivePane>2</ActivePane>
+    </WorksheetOptions>
+  </Worksheet>
+</Workbook>`;
+    _downloadSML(xml, `SOS-2627-Insumos.xls`);
 
   } else {
     const months = _lastMensualMonths;
@@ -2093,58 +2227,72 @@ function exportXLSX(tipo) {
       const [y, m] = ym.split('-');
       return `${mesToNombre(parseInt(m))} ${y}`;
     });
-    const data = [];
-    data.push([`SOS Agro — Resumen Mensual de Insumos | ${empresaLabel} | ${fechaLabel}`]);
-    data.push(['Producto / Labor', 'Tipo', 'Unidad', ...mesNombres, 'Total']);
+    const nCols = 3 + months.length + 1;
+    const colWidths = [
+      '<Column ss:Width="220"/>',
+      '<Column ss:Width="90"/>',
+      '<Column ss:Width="65"/>',
+      ...months.map(() => '<Column ss:Width="75"/>'),
+      '<Column ss:Width="85"/>'
+    ].join('');
 
     const byTipo = {};
     for (const r of _lastMensualRows) {
       if (!byTipo[r.tipo]) byTipo[r.tipo] = [];
       byTipo[r.tipo].push(r);
     }
-    const tiposSorted = Object.keys(byTipo).sort((a, b) => tipoIdx(a) - tipoIdx(b));
+    const tiposSorted = Object.keys(byTipo).sort((a,b) => tipoIdx(a)-tipoIdx(b));
+
+    let rows = '';
+
+    rows += `<Row ss:Height="22">
+      ${_smlMergeCell('SOS Agro — Resumen Mensual de Insumos  |  ${empresaLabel}  |  ${fechaLabel}', 'titulo', nCols-1)}
+    </Row>`;
+
+    rows += `<Row ss:Height="28">
+      ${_smlCell('Producto / Labor','hdrL')}
+      ${_smlCell('Tipo','hdr')}
+      ${_smlCell('Unidad','hdr')}
+      ${mesNombres.map(m => _smlCell(m,'hdr')).join('')}
+      ${_smlCell('Total','hdr')}
+    </Row>`;
 
     for (const t of tiposSorted) {
-      data.push([`— ${t.toUpperCase()} —`]);
+      rows += `<Row ss:Height="18">
+        ${_smlMergeCell('   ' + t.toUpperCase(), 'sep', nCols-1)}
+      </Row>`;
       for (const r of byTipo[t]) {
-        data.push([
-          r.prod, r.tipo, r.unidad,
-          ...months.map(m => r.byMes[m] > 0 ? r.byMes[m] : null),
-          r.total
-        ]);
+        rows += `<Row ss:Height="16">
+          ${_smlCell(r.prod,'dat')}
+          ${_smlCell(r.tipo,'datC')}
+          ${_smlCell(r.unidad,'datC')}
+          ${months.map(m => {
+            const v = r.byMes[m];
+            return v > 0 ? _smlCell(v,'num','Number') : _smlCell('','dat');
+          }).join('')}
+          ${_smlCell(r.total,'num','Number')}
+        </Row>`;
       }
     }
 
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    const nCols = 3 + months.length + 1;
-    ws['!cols'] = [{ wch: 34 }, { wch: 14 }, { wch: 10 }, ...months.map(() => ({ wch: 12 })), { wch: 13 }];
-    ws['!views'] = [{ state: 'frozen', ySplit: 2, topLeftCell: 'A3' }];
-
-    const merges = [];
-    merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: nCols - 1 } });
-    let ri = 2;
-    for (const t of tiposSorted) {
-      merges.push({ s: { r: ri, c: 0 }, e: { r: ri, c: nCols - 1 } });
-      ri += 1 + byTipo[t].length;
-    }
-    ws['!merges'] = merges;
-
-    let dr = 3;
-    for (const t of tiposSorted) {
-      dr++;
-      for (let i = 0; i < byTipo[t].length; i++) {
-        for (let mi = 0; mi <= months.length; mi++) {
-          const a = XLSX.utils.encode_cell({ r: dr, c: 3 + mi });
-          if (ws[a] && ws[a].t === 'n') ws[a].z = '#,##0.00##';
-        }
-        dr++;
-      }
-    }
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Mensual');
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  ${styles}
+  <Worksheet ss:Name="Mensual">
+    <Table>${colWidths}${rows}</Table>
+    <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+      <FreezePanes/>
+      <FrozenNoSplit/>
+      <SplitHorizontal>2</SplitHorizontal>
+      <TopRowBottomPane>2</TopRowBottomPane>
+      <ActivePane>2</ActivePane>
+    </WorksheetOptions>
+  </Worksheet>
+</Workbook>`;
+    _downloadSML(xml, `SOS-2627-Mensual.xls`);
   }
-
-  XLSX.writeFile(wb, `SOS-2627-${tipo === 'insumos' ? 'Insumos' : 'Mensual'}.xlsx`);
 }
 
 function exportPDF(tabName) {
