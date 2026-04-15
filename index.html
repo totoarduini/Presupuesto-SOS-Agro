@@ -513,10 +513,6 @@ tr:hover td { background: var(--verde-bg); }
       <label>Cultivo</label>
       <select id="ins-cultivo" onchange="renderInsumos()">
         <option value="">Todos</option>
-        <option value="Trigo">TRIGO</option><option value="Cebada">CEBADA</option>
-        <option value="Soja">SOJA</option><option value="Maiz">MAÍZ</option>
-        <option value="Girasol">GIRASOL</option><option value="Maiz tardio">MAÍZ TARDÍO</option>
-        <option value="Maiz 2da">MAÍZ 2DA</option><option value="Soja 2da">SOJA 2DA</option>
       </select>
     </div>
     <div class="form-group">
@@ -546,10 +542,6 @@ tr:hover td { background: var(--verde-bg); }
       <label>Cultivo</label>
       <select id="men-cultivo" onchange="renderMensual()">
         <option value="">Todos</option>
-        <option value="Trigo">TRIGO</option><option value="Cebada">CEBADA</option>
-        <option value="Soja">SOJA</option><option value="Maiz">MAÍZ</option>
-        <option value="Girasol">GIRASOL</option><option value="Maiz tardio">MAÍZ TARDÍO</option>
-        <option value="Maiz 2da">MAÍZ 2DA</option><option value="Soja 2da">SOJA 2DA</option>
       </select>
     </div>
     <div class="form-group">
@@ -714,8 +706,8 @@ function showTabByName(name) {
   if (name === 'planteo') renderPlanteo();
   else if (name === 'comparativo') { updateCmpFiltros(); renderComparativo(); }
   else if (name === 'porha') { initPorhaAnts(); updatePorhaFiltros(); renderPorha(); }
-  else if (name === 'insumos') { populateInsTipos(); renderInsumos(); }
-  else if (name === 'mensual') renderMensual();
+  else if (name === 'insumos') { populateInsTipos(); populateCultivosSel('ins-cultivo'); renderInsumos(); }
+  else if (name === 'mensual') { populateCultivosSel('men-cultivo'); renderMensual(); }
   else if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
   else if (name === 'costo') { initCiDefaults(); }
   else if (name === 'margen') { initMbFiltros(); renderMargen(); }
@@ -843,6 +835,9 @@ async function refreshSuperficies() {
     }
     // Actualizar selector admin si es necesario
     if (isAdmin) _updateAdminEmpresaSelector();
+    // Re-render tab activo (igual que setAdminEmpresaFilter)
+    const activeTab = document.querySelector('.tab-content.active')?.id?.replace('tab-','');
+    if (activeTab && activeTab !== 'superficies') showTabByName(activeTab);
   } catch(e) {
     if (el) { el.textContent = '❌ Error: ' + e.message; el.style.color = '#c0392b'; }
   }
@@ -1008,6 +1003,8 @@ function _showApp(empresa, admin) {
   initPorhaAnts();
   updatePltFiltros();
   populateInsTipos();
+  populateCultivosSel('ins-cultivo');
+  populateCultivosSel('men-cultivo');
   loadFromGSheets(); // carga datos de planteo desde GSheets
 }
 
@@ -1159,8 +1156,8 @@ function showTab(name) {
   if (name === 'planteo') renderPlanteo();
   if (name === 'comparativo') { updateCmpFiltros(); renderComparativo(); }
   if (name === 'porha') { initPorhaAnts(); updatePorhaFiltros(); renderPorha(); }
-  if (name === 'insumos') { populateInsTipos(); renderInsumos(); }
-  if (name === 'mensual') renderMensual();
+  if (name === 'insumos') { populateInsTipos(); populateCultivosSel('ins-cultivo'); renderInsumos(); }
+  if (name === 'mensual') { populateCultivosSel('men-cultivo'); renderMensual(); }
   if (name === 'precios') renderPrecios();
   if (name === 'timeline') { updateTlFiltros(); renderTimeline(); }
   if (name === 'costo') { initCiDefaults(); }
@@ -1843,6 +1840,16 @@ function populateInsTipos() {
   const cur = sel.value;
   sel.innerHTML = '<option value="">Todos</option>';
   for (const t of tipos) sel.innerHTML += `<option${t===cur?' selected':''}>${t}</option>`;
+}
+
+// Puebla un selector de cultivo con los cultivos presentes en superficies
+function populateCultivosSel(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const cur = sel.value;
+  const cultivos = [...new Set(superficies.map(s => s.cultivo))].sort();
+  sel.innerHTML = '<option value="">Todos</option>';
+  for (const c of cultivos) sel.innerHTML += `<option value="${c}"${c===cur?' selected':''}>${U(c)}</option>`;
 }
 let _lastInsumos = [];
 function renderInsumos() {
