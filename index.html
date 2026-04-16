@@ -2026,7 +2026,7 @@ function _smlEmptyCell(styleId, n) {
 
 // Genera y descarga un .xls (SpreadsheetML)
 function _downloadSML(xml, filename) {
-  const blob = new Blob([xml], { type: 'text/xml;charset=utf-8' });
+  const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename; a.click();
@@ -2219,7 +2219,7 @@ function exportXLSX(tipo) {
     </WorksheetOptions>
   </Worksheet>
 </Workbook>`;
-    _downloadSML(xml, `SOS-2627-Insumos.xml`);
+    _downloadSML(xml, `SOS-2627-Insumos.xls`);
 
   } else {
     const months = _lastMensualMonths;
@@ -2291,7 +2291,7 @@ function exportXLSX(tipo) {
     </WorksheetOptions>
   </Worksheet>
 </Workbook>`;
-    _downloadSML(xml, `SOS-2627-Mensual.xml`);
+    _downloadSML(xml, `SOS-2627-Mensual.xls`);
   }
 }
 
