@@ -2382,9 +2382,6 @@ function csvToPrecios(csvText) {
     const tipo = iType >= 0 ? get(iType) : 'Otro';
     const precRaw = iPrec >= 0 ? get(iPrec).replace(',','.') : '';
     const precio = precRaw === '' || precRaw === '-' ? null : parseFloat(precRaw);
-    // No cargar precios de Grano desde GSheets (pueden estar en pesos)
-    // Se configuran en u$s directamente en la pestaña Margen Bruto
-    if (tipo.toLowerCase() === 'grano') continue;
     result.push({ tipo, prod, unidad, precio: isNaN(precio) ? null : precio });
   }
   return result;
@@ -2421,34 +2418,6 @@ async function loadPreciosFromGSheets() {
 }
 
 const preciosOverrides = {}; // key: prod.toLowerCase()+'|'+unidad.toLowerCase() -> precio
-
-// Precios de GRANO en u$s — configurados directamente en la pestaña Margen Bruto
-// Independientes de GSheets (que puede tener precios en ARS)
-const granoPrecios = {
-  'trigo':       { precio: null, unidad: 'qq' },
-  'cebada':      { precio: null, unidad: 'qq' },
-  'soja':        { precio: null, unidad: 'qq' },
-  'maiz':        { precio: null, unidad: 'qq' },
-  'girasol':     { precio: null, unidad: 'qq' },
-  'maiz tardio': { precio: null, unidad: 'qq' },
-  'maiz 2da':    { precio: null, unidad: 'qq' },
-  'soja 2da':    { precio: null, unidad: 'qq' },
-};
-function setGranoPrecio(cultivo, val) {
-  const parsed = parseFloat(val.replace(',','.'));
-  granoPrecios[cultivo.toLowerCase()].precio = isNaN(parsed) ? null : parsed;
-  renderMargen();
-}
-function getGranoPrecio(cultivo) {
-  const k = cultivo.toLowerCase();
-  // 1) Configurado directamente en la UI
-  if (granoPrecios[k]?.precio !== null && granoPrecios[k]?.precio !== undefined) return granoPrecios[k].precio;
-  // 2) Override manual en pestaña Precios (cualquier combinación grain|unidad)
-  for (const [oKey, oVal] of Object.entries(preciosOverrides)) {
-    if (oKey.startsWith(k + '|') && oVal !== null) return oVal;
-  }
-  return null;
-}
 
 function getPrecio(prod, unidad) {
   const k = prod.trim().toLowerCase() + '|' + unidad.toLowerCase();
@@ -3041,35 +3010,7 @@ document.addEventListener('click', e => { if (!e.target.closest('.ms-wrap')) doc
 <!-- TAB: MARGEN BRUTO -->
 <div id="tab-margen" class="tab-content" style="padding:0">
   <div class="filters-sticky-wrap">
-  <div class="section-title" style="margin:0 0 10px">Margen Bruto por Cultivo</div>
-  <div class="filters" style="align-items:flex-end;margin-bottom:0;border:none;box-shadow:none;background:transparent;flex-wrap:wrap">
-    <div class="form-group">
-      <label>Cultivo</label>
-      <div class="ms-wrap">
-        <button class="ms-btn" onclick="toggleMs('ms-mb-cult')" type="button" id="ms-mb-cult-btn">Todos</button>
-        <div class="ms-dropdown" id="ms-mb-cult"></div>
-      </div>
-    </div>
-    <div class="form-group">
-      <label>Antecesores</label>
-      <div class="ms-wrap">
-        <button class="ms-btn" onclick="toggleMs('ms-mb-ant')" type="button" id="ms-mb-ant-btn">Todos</button>
-        <div class="ms-dropdown" id="ms-mb-ant"></div>
-      </div>
-    </div>
-    <div class="form-group">
-      <label>Situaciones</label>
-      <div class="ms-wrap">
-        <button class="ms-btn" onclick="toggleMs('ms-mb-sit')" type="button" id="ms-mb-sit-btn">Todas</button>
-        <div class="ms-dropdown" id="ms-mb-sit"></div>
-      </div>
-    </div>
-  </div>
-  <!-- Precios de grano en u$s/qq — independientes de GSheets -->
-  <div style="background:#f8fdf8;border-top:1px solid var(--verde-borde);border-bottom:1px solid var(--verde-borde);padding:8px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
-    <span style="font-size:11px;font-weight:700;color:var(--acento);text-transform:uppercase;letter-spacing:.4px;line-height:28px">Precio grano u$s/qq:</span>
-    <div id="grano-precios-inputs"></div>
-  </div>
+  <div class="section-title" style="margin:0 0 0">Margen Bruto por Cultivo</div>
   </div>
   <div id="margen-content" style="padding:14px"></div>
 </div>
@@ -3166,37 +3107,106 @@ function renderCosto() {
   const selTipos = getMsSelected('ms-ci-tipo');
 
   const CULTIVOS_ALL = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da'];
+  const haySups = superficies.length > 0;
+
+  // Helper: calcula costo/ha para un cultivo+ant+sit dado.
+  // Si hay superficies, pondera por ha reales. Si no, usa planteo directo (precio*dosis).
+  function costoHaPorCombinacion(cv, ant, sit) {
+    const activs = OPTIONS[cv]?.activs || [];
+    if (!activs.length) return {};
+    const result = {}; // tipo -> usd/ha
+
+    if (haySups) {
+      let sups = superficies.filter(s => s.cultivo === cv);
+      if (ant) sups = sups.filter(s => antMatches(s.antecesor, ant) || s.antecesor === ant);
+      if (sit) sups = sups.filter(s => sitMatches(s.situacion, sit) || s.situacion === sit);
+      const totalHa = sups.reduce((sum, s) => sum + s.ha, 0);
+      if (!totalHa) return {};
+      for (const sup of sups) {
+        const recs = filterRecords(cv, sup.antecesor, sup.situacion);
+        const filtrados = selTipos.length > 0 ? recs.filter(r => selTipos.includes(r.Tipo)) : recs;
+        for (const r of filtrados) {
+          const precio = getPrecio(r['Produc/labor'], r.Unidad);
+          if (precio === null) continue;
+          if (!result[r.Tipo]) result[r.Tipo] = 0;
+          result[r.Tipo] += precio * r.Dosis * sup.ha;
+        }
+      }
+      // dividir por totalHa para tener u$s/ha ponderado
+      for (const t of Object.keys(result)) result[t] /= totalHa;
+    } else {
+      // Sin superficies: planteo directo
+      let recs = RECORDS.filter(r =>
+        activs.includes(normActiv(r.Activ)) &&
+        r['E/I'] === 'Egreso' &&
+        r.Tipo !== 'Grano' &&
+        (ant ? antMatches(r.Antecesor, ant) : true) &&
+        (sit ? sitMatches(r.Situacion, sit) : true)
+      );
+      if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
+      for (const r of recs) {
+        const precio = getPrecio(r['Produc/labor'], r.Unidad);
+        if (precio === null) continue;
+        if (!result[r.Tipo]) result[r.Tipo] = 0;
+        result[r.Tipo] += precio * r.Dosis;
+      }
+    }
+    return result;
+  }
 
   if (!cultivo) {
-    // Sin cultivo: columnas = cultivos, filtrar por ant/sit seleccionados
+    // Sin cultivo: columnas = cultivos
     const colData = {};
     const allTipos = new Set();
     const cols = CULTIVOS_ALL;
 
     for (const cv of cols) {
-      colData[cv] = {};
-      const activs = OPTIONS[cv]?.activs || [];
       const allAnts = OPTIONS[cv]?.antecesores || [];
       const allSits = getSituacionesDisplay(cv);
       const activeAnts = selAnts.length > 0 ? selAnts.filter(a => allAnts.includes(a)) : allAnts;
       const activeSits = selSits.length > 0 ? selSits.filter(s => allSits.includes(s)) : allSits;
-      if (!activeAnts.length || !activeSits.length) continue;
+      if (!activeAnts.length || !activeSits.length) { colData[cv] = {}; continue; }
 
-      let recs = RECORDS.filter(r =>
-        activs.includes(normActiv(r.Activ)) &&
-        r['E/I'] === 'Egreso' &&
-        r.Tipo !== 'Grano' &&
-        activeAnts.some(a => antMatches(r.Antecesor, a)) &&
-        activeSits.some(s => sitMatches(r.Situacion, s))
-      );
-      if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
-
-      for (const r of recs) {
-        const precio = getPrecio(r['Produc/labor'], r.Unidad);
-        if (precio === null) continue;
-        if (!colData[cv][r.Tipo]) colData[cv][r.Tipo] = 0;
-        colData[cv][r.Tipo] += precio * r.Dosis;
-        allTipos.add(r.Tipo);
+      if (haySups) {
+        // Ponderado por ha reales: sumar todos los ant/sit filtrados
+        let sups = superficies.filter(s => s.cultivo === cv &&
+          activeAnts.some(a => antMatches(s.antecesor, a) || s.antecesor === a) &&
+          activeSits.some(s2 => sitMatches(s.situacion, s2) || s.situacion === s2)
+        );
+        const totalHa = sups.reduce((sum, s) => sum + s.ha, 0);
+        colData[cv] = {};
+        if (!totalHa) continue;
+        for (const sup of sups) {
+          const recs = filterRecords(cv, sup.antecesor, sup.situacion);
+          const filtrados = selTipos.length > 0 ? recs.filter(r => selTipos.includes(r.Tipo)) : recs;
+          for (const r of filtrados) {
+            const precio = getPrecio(r['Produc/labor'], r.Unidad);
+            if (precio === null) continue;
+            if (!colData[cv][r.Tipo]) colData[cv][r.Tipo] = 0;
+            colData[cv][r.Tipo] += precio * r.Dosis * sup.ha;
+            allTipos.add(r.Tipo);
+          }
+        }
+        for (const t of Object.keys(colData[cv])) colData[cv][t] /= totalHa;
+      } else {
+        // Sin superficies: planteo directo
+        const activs = OPTIONS[cv]?.activs || [];
+        let recs = RECORDS.filter(r =>
+          activs.includes(normActiv(r.Activ)) &&
+          r['E/I'] === 'Egreso' &&
+          r.Tipo !== 'Grano' &&
+          activeAnts.some(a => antMatches(r.Antecesor, a)) &&
+          activeSits.some(s => sitMatches(r.Situacion, s))
+        );
+        if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
+        colData[cv] = {};
+        for (const r of recs) {
+          const precio = getPrecio(r['Produc/labor'], r.Unidad);
+          if (precio === null) continue;
+          if (!colData[cv][r.Tipo]) colData[cv][r.Tipo] = 0;
+          colData[cv][r.Tipo] += precio * r.Dosis;
+          allTipos.add(r.Tipo);
+        }
       }
     }
 
@@ -3211,7 +3221,8 @@ function renderCosto() {
     const filterInfo = [];
     if (selAnts.length > 0) filterInfo.push(`Ant: ${selAnts.join(', ')}`);
     if (selSits.length > 0) filterInfo.push(`Sit: ${selSits.join(', ')}`);
-    let html = `<p style="margin-bottom:8px;color:#666;font-size:12px">${tipos.length} tipos · todos los cultivos${filterInfo.length ? ' · ' + filterInfo.join(' · ') : ''} &nbsp;·&nbsp; <em style="color:#999">Valores en u$s/ha</em></p>`;
+    const notaHa = haySups ? 'u$s/ha ponderado por superficie' : 'u$s/ha del planteo técnico';
+    let html = `<p style="margin-bottom:8px;color:#666;font-size:12px">${tipos.length} tipos · todos los cultivos${filterInfo.length ? ' · ' + filterInfo.join(' · ') : ''} &nbsp;·&nbsp; <em style="color:#999">${notaHa}</em></p>`;
     html += `<div class="table-scroll-wrap"><table class="tbl-prod" style="table-layout:fixed">${colgroup}<thead><tr>
       <th style="text-align:left;border-radius:6px 0 0 0">Tipo</th>
       ${cols.map((c,i) => `<th style="text-align:right${i===cols.length-1?';border-radius:0 6px 0 0':''}"><span class="badge badge-${({Trigo:'trigo',Cebada:'cebada',Soja:'soja',Maiz:'maiz',Girasol:'girasol','Maiz tardio':'tardio'})[c]||'tipo'}">${c}</span></th>`).join('')}
@@ -3220,7 +3231,7 @@ function renderCosto() {
     for (const tipo of tipos) {
       html += `<tr><td>${tipoBadge(tipo)}</td>`;
       for (const cv of cols) {
-        const v = colData[cv][tipo];
+        const v = colData[cv]?.[tipo];
         html += v != null && v > 0 ? `<td style="text-align:right" class="costo-cell">u$s ${fmtNum(v,2)}</td>` : `<td style="text-align:right;color:#ccc">—</td>`;
         if (!totals[cv]) totals[cv] = 0;
         totals[cv] += v || 0;
@@ -3234,12 +3245,11 @@ function renderCosto() {
     return;
   }
 
-  // Con cultivo seleccionado: comportamiento original con pivot sit/ant
+  // Con cultivo seleccionado: pivot sit/ant
   const activs = OPTIONS[cultivo].activs;
   const allAnts = OPTIONS[cultivo].antecesores;
   const allSits = getSituacionesDisplay(cultivo);
 
-  // Columnas según pivot
   let cols;
   if (ciPivot === 'sit') {
     cols = selSits.length > 0 ? selSits : allSits;
@@ -3250,32 +3260,53 @@ function renderCosto() {
   const activeAnts = selAnts.length > 0 ? selAnts : allAnts;
   const activeSits = selSits.length > 0 ? selSits : allSits;
 
-  // Construir mapa: col -> tipo -> costoTotal/ha
-  const colData = {}; // col -> tipo -> usd_ha
+  const colData = {};
   const allTipos = new Set();
 
   for (const col of cols) {
-    colData[col] = {};
     const filterAnts = ciPivot === 'sit' ? activeAnts : [col];
     const filterSits = ciPivot === 'sit' ? [col] : activeSits;
 
-    let recs = RECORDS.filter(r =>
-      activs.includes(normActiv(r.Activ)) &&
-      r['E/I'] === 'Egreso' &&
-      r.Tipo !== 'Grano' &&
-      filterAnts.some(a => antMatches(r.Antecesor, a)) &&
-      filterSits.some(s => sitMatches(r.Situacion, s))
-    );
-
-    if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
-
-    for (const r of recs) {
-      const precio = getPrecio(r['Produc/labor'], r.Unidad);
-      if (precio === null) continue;
-      const costoHa = precio * r.Dosis;
-      if (!colData[col][r.Tipo]) colData[col][r.Tipo] = 0;
-      colData[col][r.Tipo] += costoHa;
-      allTipos.add(r.Tipo);
+    if (haySups) {
+      // Ponderado por ha reales
+      let sups = superficies.filter(s => s.cultivo === cultivo &&
+        filterAnts.some(a => antMatches(s.antecesor, a) || s.antecesor === a) &&
+        filterSits.some(s2 => sitMatches(s.situacion, s2) || s.situacion === s2)
+      );
+      const totalHa = sups.reduce((sum, s) => sum + s.ha, 0);
+      colData[col] = {};
+      if (!totalHa) continue;
+      for (const sup of sups) {
+        const recs = filterRecords(cultivo, sup.antecesor, sup.situacion);
+        const filtrados = selTipos.length > 0 ? recs.filter(r => selTipos.includes(r.Tipo)) : recs;
+        for (const r of filtrados) {
+          const precio = getPrecio(r['Produc/labor'], r.Unidad);
+          if (precio === null) continue;
+          if (!colData[col][r.Tipo]) colData[col][r.Tipo] = 0;
+          colData[col][r.Tipo] += precio * r.Dosis * sup.ha;
+          allTipos.add(r.Tipo);
+        }
+      }
+      for (const t of Object.keys(colData[col])) colData[col][t] /= totalHa;
+    } else {
+      // Sin superficies: planteo directo
+      let recs = RECORDS.filter(r =>
+        activs.includes(normActiv(r.Activ)) &&
+        r['E/I'] === 'Egreso' &&
+        r.Tipo !== 'Grano' &&
+        filterAnts.some(a => antMatches(r.Antecesor, a)) &&
+        filterSits.some(s => sitMatches(r.Situacion, s))
+      );
+      if (selTipos.length > 0) recs = recs.filter(r => selTipos.includes(r.Tipo));
+      colData[col] = {};
+      for (const r of recs) {
+        const precio = getPrecio(r['Produc/labor'], r.Unidad);
+        if (precio === null) continue;
+        const costoHa = precio * r.Dosis;
+        if (!colData[col][r.Tipo]) colData[col][r.Tipo] = 0;
+        colData[col][r.Tipo] += costoHa;
+        allTipos.add(r.Tipo);
+      }
     }
   }
 
@@ -3289,6 +3320,7 @@ function renderCosto() {
 
   const dataPct = (80 / Math.max(cols.length, 1)).toFixed(2);
   const colgroup = `<colgroup><col style="width:20%">${cols.map(() => `<col style="width:${dataPct}%">`).join('')}</colgroup>`;
+  const notaHa = haySups ? 'u$s/ha ponderado por superficie' : 'u$s/ha del planteo técnico';
 
   let html = `<div class="table-scroll-wrap">
   <table class="tbl-prod" style="table-layout:fixed">
@@ -3303,7 +3335,7 @@ function renderCosto() {
   for (const tipo of tipos) {
     html += `<tr><td>${tipoBadge(tipo)}</td>`;
     for (const col of cols) {
-      const v = colData[col][tipo];
+      const v = colData[col]?.[tipo];
       html += v != null && v > 0 ? `<td style="text-align:right" class="costo-cell">u$s ${fmtNum(v,2)}</td>` : `<td style="text-align:right;color:#ccc">—</td>`;
       if (!totals[col]) totals[col] = 0;
       totals[col] += v || 0;
@@ -3311,7 +3343,6 @@ function renderCosto() {
     html += `</tr>`;
   }
 
-  // Fila de totales
   html += `<tr class="total-row"><td><strong>TOTAL u$s/ha</strong></td>`;
   for (const col of cols) {
     const t = totals[col] || 0;
@@ -3320,7 +3351,7 @@ function renderCosto() {
   html += `</tr></tbody></table></div>`;
 
   const label = ciPivot === 'sit' ? 'situación' : 'antecesor';
-  html = `<p style="margin-bottom:8px;color:#666;font-size:12px">${tipos.length} tipos · ${cols.length} ${label === 'situación' ? 'situaciones' : 'antecesores'} comparados &nbsp;·&nbsp; <em style="color:#999">Valores en u$s/ha</em></p>` + html;
+  html = `<p style="margin-bottom:8px;color:#666;font-size:12px">${tipos.length} tipos · ${cols.length} ${label === 'situación' ? 'situaciones' : 'antecesores'} comparados &nbsp;·&nbsp; <em style="color:#999">${notaHa}</em></p>` + html;
 
   wrap.innerHTML = html;
 }
@@ -3329,241 +3360,190 @@ function renderCosto() {
 //  TAB: MARGEN BRUTO
 // ============================================================
 
-function renderGranoInputs() {
-  // Renderiza inputs de precio de grano en u$s/qq para cada cultivo con superficie
-  const cultivosConSup = [...new Set(superficies.map(s => s.cultivo))];
-  const CULTIVOS_LABELS = {
-    'Trigo':'Trigo','Cebada':'Cebada','Soja':'Soja','Maiz':'Maíz',
-    'Girasol':'Girasol','Maiz tardio':'M.Tardío','Maiz 2da':'M.2da','Soja 2da':'S.2da'
-  };
-  const wrap = document.getElementById('grano-precios-inputs');
-  if (!wrap) return;
-  let html = '<div style="display:flex;flex-wrap:wrap;gap:8px">';
-  for (const cv of ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da']) {
-    if (!cultivosConSup.includes(cv)) continue;
-    const k = cv.toLowerCase();
-    const val = granoPrecios[k]?.precio;
-    const displayVal = val !== null && val !== undefined ? String(val).replace('.',',') : '';
-    html += `<div style="display:flex;flex-direction:column;gap:2px">
-      <label style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.3px">${CULTIVOS_LABELS[cv]||cv}</label>
-      <div style="display:flex;align-items:center;gap:3px">
-        <span style="font-size:11px;color:#888">u$s</span>
-        <input type="text" inputmode="decimal" value="${displayVal}" placeholder="—"
-          style="width:60px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;font-size:12px;text-align:right"
-          onchange="setGranoPrecio('${cv}',this.value)"
-          title="Precio de ${CULTIVOS_LABELS[cv]||cv} en u$s/qq">
-        <span style="font-size:10px;color:#aaa">/qq</span>
-      </div>
-    </div>`;
-  }
-  html += '</div>';
-  wrap.innerHTML = html;
-}
+// Estado de selección por cultivo: { cultivo -> { ant, sit } }
+const mbSeleccion = {};
 
 function initMbFiltros() {
-  const CULTIVOS_ALL = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da'];
-  // Solo cultivos con superficie cargada
-  const cultivosConSup = CULTIVOS_ALL.filter(c => superficies.some(s => s.cultivo === c));
-
-  // ── Cultivo multiselect ───────────────────────────────────────────────────
-  const msCult = document.getElementById('ms-mb-cult');
-  msCult.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-mb-cult-all"
-    onchange="toggleMsAll('ms-mb-cult','ms-mb-cult-btn','ms-mb-cult-all','Todos');updateMbAntSit()"> <em>Todos</em></label>`
-    + cultivosConSup.map(c => `<label class="ms-item"><input type="checkbox" value="${c}"
-      onchange="refreshMsBtn('ms-mb-cult','ms-mb-cult-btn');updateMbAntSit()">${U(c)}</label>`).join('');
-  document.getElementById('ms-mb-cult-btn').textContent = `Todos (${cultivosConSup.length})`;
-
-  updateMbAntSit();
+  // Inicializar selecciones con el primer valor disponible por cultivo
+  const CULTIVOS = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da'];
+  for (const cultivo of CULTIVOS) {
+    if (!mbSeleccion[cultivo]) {
+      const ants = OPTIONS[cultivo]?.antecesores || [];
+      const sits = getSituacionesDisplay(cultivo);
+      mbSeleccion[cultivo] = {
+        ant: ants[0] || '',
+        sit: sits[0] || ''
+      };
+    }
+  }
+  renderMargen();
 }
 
-// Actualiza ant/sit según cultivos seleccionados
-function updateMbAntSit() {
-  const selCults = getMsSelected('ms-mb-cult');
-  const CULTIVOS_ALL = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da'];
-  const cultivosActivos = selCults.length > 0
-    ? selCults
-    : CULTIVOS_ALL.filter(c => superficies.some(s => s.cultivo === c));
-
-  // Antecesores: solo los presentes en las superficies de los cultivos activos
-  const allAnts = [...new Set(
-    superficies
-      .filter(s => cultivosActivos.includes(s.cultivo) && s.antecesor)
-      .map(s => s.antecesor)
-  )].sort();
-
-  // Situaciones: solo las presentes en las superficies de los cultivos activos
-  const allSits = [...new Set(
-    superficies
-      .filter(s => cultivosActivos.includes(s.cultivo) && s.situacion)
-      .map(s => s.situacion)
-  )].sort();
-
-  // Preservar selecciones actuales que siguen siendo válidas
-  const prevAnts = getMsSelected('ms-mb-ant').filter(a => allAnts.includes(a));
-  const prevSits = getMsSelected('ms-mb-sit').filter(s => allSits.includes(s));
-
-  const msAnt = document.getElementById('ms-mb-ant');
-  msAnt.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todos__" id="ms-mb-ant-all"
-    onchange="toggleMsAll('ms-mb-ant','ms-mb-ant-btn','ms-mb-ant-all','Todos');renderMargen()"> <em>Todos</em></label>`
-    + allAnts.map(a => `<label class="ms-item"><input type="checkbox" value="${a}"
-      onchange="refreshMsBtn('ms-mb-ant','ms-mb-ant-btn');renderMargen()">${U(a)}</label>`).join('');
-  document.getElementById('ms-mb-ant-btn').textContent = `Todos (${allAnts.length})`;
-
-  const msSit = document.getElementById('ms-mb-sit');
-  msSit.innerHTML = `<label class="ms-item"><input type="checkbox" value="__todas__" id="ms-mb-sit-all"
-    onchange="toggleMsAll('ms-mb-sit','ms-mb-sit-btn','ms-mb-sit-all','Todas');renderMargen()"> <em>Todas</em></label>`
-    + allSits.map(s => `<label class="ms-item"><input type="checkbox" value="${s}"
-      onchange="refreshMsBtn('ms-mb-sit','ms-mb-sit-btn');renderMargen()">${U(s)}</label>`).join('');
-  document.getElementById('ms-mb-sit-btn').textContent = `Todas (${allSits.length})`;
-
-  // Restaurar selecciones previas válidas
-  if (prevAnts.length > 0) {
-    msAnt.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      if (prevAnts.includes(cb.value)) cb.checked = true;
-    });
-    refreshMsBtn('ms-mb-ant', 'ms-mb-ant-btn');
-  }
-  if (prevSits.length > 0) {
-    msSit.querySelectorAll('input[type=checkbox]').forEach(cb => {
-      if (prevSits.includes(cb.value)) cb.checked = true;
-    });
-    refreshMsBtn('ms-mb-sit', 'ms-mb-sit-btn');
-  }
-
-  renderGranoInputs();
+function mbOnChange(cultivo, tipo, val) {
+  if (!mbSeleccion[cultivo]) mbSeleccion[cultivo] = { ant: '', sit: '' };
+  mbSeleccion[cultivo][tipo] = val;
   renderMargen();
 }
 
 function renderMargen() {
-  renderGranoInputs(); // actualizar inputs por si cambiaron las superficies
   const wrap = document.getElementById('margen-content');
-  const selAnts = getMsSelected('ms-mb-ant');
-  const selSits = getMsSelected('ms-mb-sit');
-  const selCults = getMsSelected('ms-mb-cult');
 
-  const CULTIVOS = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da'];
-  // Si hay cultivos seleccionados en el filtro, mostrar solo esos; si no, todos los que tienen sup
-  const cultivosFiltro = selCults.length > 0
-    ? CULTIVOS.filter(c => selCults.includes(c))
-    : CULTIVOS;
-
-  // Calcular para cada cultivo: ingreso_ha, costo_ha, margen_ha
-  // Filtro: si hay ant/sit seleccionados, solo incluir registros que matcheen
-  // Primero chequear cuales cultivos tienen superficies definidas
-  const cultivosConSup = [...new Set(superficies.map(s=>s.cultivo))];
-
-  // Para el margen, necesitamos la superficie sembrada (filtrada)
-  // La superficie sembrada filtrada = sum de ha de superficies que matcheen ant/sit filtros
-  function haFiltrada(cultivo) {
-    let sups = superficies.filter(s => s.cultivo === cultivo);
-    if (selAnts.length > 0) sups = sups.filter(s => selAnts.includes(s.antecesor));
-    if (selSits.length > 0) sups = sups.filter(s => selSits.includes(s.situacion));
-    return sups.reduce((sum, s) => sum + s.ha, 0);
-  }
-
-  // Para calcular dólares totales (no /ha) necesitamos filtrar por superficie
-  // Ingreso: Tipo === 'Grano', E/I === 'Ingreso'
-  // Costo: E/I === 'Egreso', Tipo !== 'Grano'
   function calcCultivoMargen(cultivo) {
     const activs = OPTIONS[cultivo]?.activs || [];
     if (!activs.length) return null;
 
-    // Superficies filtradas por ant/sit seleccionados
+    const sel = mbSeleccion[cultivo] || {};
+    const selAnt = sel.ant || '';
+    const selSit = sel.sit || '';
+
+    // Superficies del cultivo filtradas por ant/sit seleccionados
     let sups = superficies.filter(s => s.cultivo === cultivo);
-    if (selAnts.length > 0) sups = sups.filter(s => selAnts.includes(s.antecesor));
-    if (selSits.length > 0) sups = sups.filter(s => selSits.includes(s.situacion));
+    if (selAnt) sups = sups.filter(s => antMatches(selAnt, s.antecesor) || antMatches(s.antecesor, selAnt) || s.antecesor === selAnt);
+    if (selSit) sups = sups.filter(s => sitMatches(selSit, s.situacion) || sitMatches(s.situacion, selSit) || s.situacion === selSit);
 
-    const totalHa = sups.reduce((sum, s) => sum + parseFloat(s.ha || 0), 0);
-    if (totalHa === 0) return null;
-
-    const pGrano = getGranoPrecio(cultivo); // precio de grano en u$s/qq configurado en UI
+    const totalHa = sups.reduce((sum, s) => sum + s.ha, 0);
+    if (totalHa === 0 && sups.length === 0) return null;
 
     let ingresoTotal = 0, costoTotal = 0;
     let nSinPrecioIngreso = 0, nSinPrecioCosto = 0;
 
-    for (const sup of sups) {
-      const ha = parseFloat(sup.ha || 0);
-
-      // ── INGRESO: precio grano (u$s/qq) × rendimiento (qq/ha) × ha ────────
-      // Misma fórmula que costo: sum(precio × dosis × ha) ÷ totalHa filtrado
-      const ingRecs = RECORDS.filter(r =>
-        activs.includes(normActiv(r.Activ)) &&
-        r['E/I'].toLowerCase() === 'ingreso' &&
-        r.Tipo.toLowerCase() === 'grano' &&
-        antMatches(r.Antecesor, sup.antecesor) &&
-        sitMatches(r.Situacion, sup.situacion)
-      );
-      for (const r of ingRecs) {
-        const dosis = getDosis(sup.id, r);
-        if (pGrano !== null) {
-          ingresoTotal += pGrano * dosis * ha;
-        } else {
-          nSinPrecioIngreso++;
+    // Si hay superficies filtradas, calcular por superficie real
+    if (sups.length > 0) {
+      for (const sup of sups) {
+        const ingRecs = RECORDS.filter(r =>
+          activs.includes(normActiv(r.Activ)) &&
+          r['E/I'] === 'Ingreso' &&
+          r.Tipo === 'Grano' &&
+          antMatches(r.Antecesor, sup.antecesor) &&
+          sitMatches(r.Situacion, sup.situacion)
+        );
+        for (const r of ingRecs) {
+          const p = getPrecio(r['Produc/labor'], r.Unidad);
+          if (p !== null) ingresoTotal += p * r.Dosis * sup.ha;
+          else nSinPrecioIngreso++;
+        }
+        const costoRecs = filterRecords(sup.cultivo, sup.antecesor, sup.situacion);
+        for (const r of costoRecs) {
+          const p = getPrecio(r['Produc/labor'], r.Unidad);
+          if (p !== null) costoTotal += p * r.Dosis * sup.ha;
+          else nSinPrecioCosto++;
         }
       }
-
-      // ── COSTO: egreso, no grano — sum(precio × dosis × ha) ───────────────
-      const costoRecs = filterRecords(sup.cultivo, sup.antecesor, sup.situacion);
-      for (const r of costoRecs) {
-        const dosis = getDosis(sup.id, r);
+    } else {
+      // Sin superficies cargadas: calcular /ha directo con ant/sit del selector
+      const antFilter = selAnt || '__todos__';
+      const sitFilter = selSit || '__todas__';
+      const ingRecs = RECORDS.filter(r =>
+        activs.includes(normActiv(r.Activ)) &&
+        r['E/I'] === 'Ingreso' &&
+        r.Tipo === 'Grano' &&
+        (antFilter === '__todos__' || antMatches(r.Antecesor, antFilter)) &&
+        (sitFilter === '__todas__' || sitMatches(r.Situacion, sitFilter))
+      );
+      for (const r of ingRecs) {
         const p = getPrecio(r['Produc/labor'], r.Unidad);
-        if (p !== null) costoTotal += p * dosis * ha;
+        if (p !== null) ingresoTotal += p * r.Dosis;
+        else nSinPrecioIngreso++;
+      }
+      const costoRecs = RECORDS.filter(r =>
+        activs.includes(normActiv(r.Activ)) &&
+        r['E/I'] === 'Egreso' &&
+        r.Tipo !== 'Grano' &&
+        (antFilter === '__todos__' || antMatches(r.Antecesor, antFilter)) &&
+        (sitFilter === '__todas__' || sitMatches(r.Situacion, sitFilter))
+      );
+      for (const r of costoRecs) {
+        const p = getPrecio(r['Produc/labor'], r.Unidad);
+        if (p !== null) costoTotal += p * r.Dosis;
         else nSinPrecioCosto++;
       }
     }
 
-    // Ambos: total$ filtrado ÷ ha filtradas
-    const ingresoHa = totalHa > 0 ? ingresoTotal / totalHa : 0;
-    const costoHa   = totalHa > 0 ? costoTotal   / totalHa : 0;
-    const margenHa  = ingresoHa - costoHa;
+    const ha = totalHa > 0 ? totalHa : 1;
+    const ingresoHa = ingresoTotal / ha;
+    const costoHa = costoTotal / ha;
+    const margenHa = ingresoHa - costoHa;
 
-    return { cultivo, totalHa, ingresoTotal, costoTotal, ingresoHa, costoHa, margenHa, nSinPrecioIngreso, nSinPrecioCosto };
+    return { cultivo, totalHa, ingresoHa, costoHa, margenHa, nSinPrecioIngreso, nSinPrecioCosto };
   }
 
-  const rows = cultivosFiltro.map(c => calcCultivoMargen(c)).filter(Boolean);
+  const CULTIVOS = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da'];
+  const cultivosConDatos = CULTIVOS.filter(c => OPTIONS[c]?.activs?.length);
 
-  if (!rows.length) {
-    if (!superficies.length) {
-      wrap.innerHTML = '<div class="no-superficies">⚠️ Primero definí las superficies en la pestaña "Superficies".</div>';
-    } else {
-      wrap.innerHTML = '<p class="empty">Sin superficies para los filtros seleccionados.</p>';
-    }
+  if (!cultivosConDatos.length) {
+    wrap.innerHTML = '<div class="no-superficies">⚠️ Sin datos de planteo cargados.</div>';
     return;
   }
 
-  const filtroInfo = [];
-  if (selAnts.length > 0) filtroInfo.push(`Ant: ${selAnts.map(U).join(', ')}`);
-  if (selSits.length > 0) filtroInfo.push(`Sit: ${selSits.map(U).join(', ')}`);
+  const haySups = superficies.length > 0;
+  const subtitulo = haySups
+    ? '<em style="color:#999">Valores en u$s/ha (total u$s ÷ superficie filtrada)</em>'
+    : '<em style="color:#e6a817">⚠️ Sin superficies cargadas — valores calculados directamente como u$s/ha del planteo</em>';
 
-  let html = `<p style="margin-bottom:10px;color:#666;font-size:12px">${rows.length} cultivo(s) con superficie definida${filtroInfo.length ? ' · ' + filtroInfo.join(' · ') : ''} &nbsp;·&nbsp; <em style="color:#999">Valores en u$s/ha (total u$s ÷ superficie filtrada)</em></p>`;
+  let html = `<p style="margin-bottom:10px;color:#666;font-size:12px">${subtitulo}</p>`;
 
-  html += `<div class="table-scroll-wrap"><table class="tbl-prod" style="table-layout:fixed;min-width:700px">
-  <colgroup>
-    <col style="width:18%"><col style="width:12%">
-    <col style="width:17%"><col style="width:17%"><col style="width:17%">
-    <col style="width:10%"><col style="width:9%">
-  </colgroup>
+  html += `<div class="table-scroll-wrap"><table class="tbl-prod" style="table-layout:auto;min-width:820px">
   <thead><tr>
-    <th style="text-align:left;border-radius:6px 0 0 0">Cultivo</th>
-    <th style="text-align:right">Ha (filtradas)</th>
-    <th style="text-align:right">Ingreso u$s/ha</th>
-    <th style="text-align:right">Costo u$s/ha</th>
-    <th style="text-align:right;border-radius:0 6px 0 0">Margen Bruto u$s/ha</th>
+    <th style="text-align:left;border-radius:6px 0 0 0;min-width:130px">Cultivo</th>
+    <th style="text-align:left;min-width:150px">Antecesor</th>
+    <th style="text-align:left;min-width:150px">Situación</th>
+    <th style="text-align:right;min-width:100px">Ha (filtradas)</th>
+    <th style="text-align:right;min-width:120px">Ingreso u$s/ha</th>
+    <th style="text-align:right;min-width:120px">Costo u$s/ha</th>
+    <th style="text-align:right;min-width:140px;border-radius:0 6px 0 0">Margen Bruto u$s/ha</th>
   </tr></thead>
   <tbody>`;
 
-  for (const r of rows) {
+  let hayGranoSinPrecio = false;
+
+  for (const cultivo of cultivosConDatos) {
+    const ants = OPTIONS[cultivo]?.antecesores || [];
+    const sits = getSituacionesDisplay(cultivo);
+    const sel = mbSeleccion[cultivo] || { ant: ants[0] || '', sit: sits[0] || '' };
+
+    const selOpts = (arr, val, tipo) =>
+      arr.map(v => `<option value="${v}"${v===val?' selected':''}>${U(v)}</option>`).join('');
+
+    const antSel = `<select style="width:100%;padding:3px 5px;border:1px solid var(--verde-borde);border-radius:4px;font-size:12px;background:white"
+      onchange="mbOnChange('${cultivo.replace(/'/g,"\\'")}','ant',this.value)">
+      ${selOpts(ants, sel.ant, 'ant')}
+    </select>`;
+
+    const sitSel = `<select style="width:100%;padding:3px 5px;border:1px solid var(--verde-borde);border-radius:4px;font-size:12px;background:white"
+      onchange="mbOnChange('${cultivo.replace(/'/g,"\\'")}','sit',this.value)">
+      ${selOpts(sits, sel.sit, 'sit')}
+    </select>`;
+
+    const r = calcCultivoMargen(cultivo);
+
+    if (!r) {
+      // Cultivo sin superficie y sin datos — igual mostrar fila con selectores
+      html += `<tr>
+        <td style="text-align:left">${cultivoBadge(cultivo)}</td>
+        <td style="padding:4px 8px">${antSel}</td>
+        <td style="padding:4px 8px">${sitSel}</td>
+        <td style="text-align:right;color:#aaa" colspan="4">—</td>
+      </tr>`;
+      continue;
+    }
+
+    if (r.nSinPrecioIngreso > 0) hayGranoSinPrecio = true;
+
     const margenColor = r.margenHa >= 0 ? '#1a5c2a' : '#c0392b';
-    const margenBg = r.margenHa >= 0 ? '#f0f9f0' : '#fdf0f0';
+    const margenBg   = r.margenHa >= 0 ? '#f0f9f0' : '#fdf0f0';
+
     html += `<tr>
-      <td style="text-align:left">${cultivoBadge(r.cultivo)}</td>
-      <td style="text-align:right">${fmtNum(r.totalHa,1)} ha</td>
-      <td style="text-align:right;color:#0a7;font-weight:600">${r.ingresoHa > 0 ? 'u$s ' + fmtNum(r.ingresoHa,2) : r.nSinPrecioIngreso > 0 ? '<span style="color:#e6a817;font-size:11px">⚠️ sin precio</span>' : '<span style="color:#ccc">—</span>'}</td>
-      <td style="text-align:right;color:#c0392b;font-weight:600">u$s ${fmtNum(r.costoHa,2)}</td>
+      <td style="text-align:left">${cultivoBadge(cultivo)}</td>
+      <td style="padding:4px 8px">${antSel}</td>
+      <td style="padding:4px 8px">${sitSel}</td>
+      <td style="text-align:right">${r.totalHa > 0 ? fmtNum(r.totalHa,1) + ' ha' : '<span style="color:#aaa">—</span>'}</td>
+      <td style="text-align:right;color:#0a7;font-weight:600">${r.ingresoHa > 0 ? 'u$s ' + fmtNum(r.ingresoHa,2) : '<span style="color:#ccc">—</span>'}</td>
+      <td style="text-align:right;color:#c0392b;font-weight:600">${r.costoHa > 0 ? 'u$s ' + fmtNum(r.costoHa,2) : '<span style="color:#ccc">—</span>'}</td>
       <td style="text-align:right;font-weight:700;color:${margenColor};background:${margenBg}">u$s ${fmtNum(r.margenHa,2)}</td>
     </tr>`;
+
     if (r.nSinPrecioIngreso > 0 || r.nSinPrecioCosto > 0) {
-      html += `<tr><td colspan="5" style="text-align:right;font-size:10px;color:#aaa;padding:2px 10px">
+      html += `<tr><td colspan="7" style="text-align:right;font-size:10px;color:#aaa;padding:2px 10px">
         ${r.nSinPrecioIngreso > 0 ? r.nSinPrecioIngreso + ' ítem(s) de ingreso sin precio' : ''}
         ${r.nSinPrecioIngreso > 0 && r.nSinPrecioCosto > 0 ? ' · ' : ''}
         ${r.nSinPrecioCosto > 0 ? r.nSinPrecioCosto + ' ítem(s) de costo sin precio' : ''}
@@ -3573,11 +3553,9 @@ function renderMargen() {
 
   html += `</tbody></table></div>`;
 
-  // Advertencia si hay items sin precio de grano
-  const hayGranoSinPrecio = rows.some(r => r.nSinPrecioIngreso > 0);
   if (hayGranoSinPrecio) {
     html += `<div style="margin-top:10px;background:#fff8e8;border:1px solid #e6a817;border-radius:4px;padding:8px 12px;font-size:12px;color:#7a5800">
-      ⚠️ Configurá el <strong>Precio grano u$s/qq</strong> arriba para cada cultivo. Los precios deben ser en <strong>dólares</strong> (u$s por quintal).
+      ⚠️ Algunos cultivos tienen ítems de ingreso (precio de grano) sin precio configurado. Configurá los precios de grano en la pestaña <strong>💲 Precios</strong>.
     </div>`;
   }
 
