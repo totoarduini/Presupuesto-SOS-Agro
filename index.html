@@ -791,12 +791,18 @@ function csvToSupRows(csvText) {
     const row = {};
     headers.forEach((h, idx) => row[h] = (vals[idx]||'').trim().replace(/^"|"$/g,''));
     if (!row['empresa'] || !row['cultivo']) continue;
-    // Normalizar cultivo al nombre exacto de OPTIONS (tolerante a mayúsculas/minúsculas y tildes)
+    // Normalizar cultivo con mapa directo (insensible a mayúsculas y tildes)
     const cultivoRaw = row['cultivo'].trim();
-    const cultivoNorm = Object.keys(OPTIONS).find(
-      k => k.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'') ===
-           cultivoRaw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    ) || cultivoRaw;
+    const CULTIVO_NORM_MAP = {
+      'trigo':'Trigo','cebada':'Cebada','soja':'Soja','maiz':'Maiz',
+      'girasol':'Girasol','maiz tardio':'Maiz tardio',
+      'maiz 2da':'Maiz 2da','soja 2da':'Soja 2da'
+    };
+    const cultivoKey = cultivoRaw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const cultivoNorm = CULTIVO_NORM_MAP[cultivoKey] ||
+      Object.keys(OPTIONS).find(k =>
+        k.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'') === cultivoKey
+      ) || cultivoRaw;
     rows.push({
       empresa:     row['empresa'],
       responsable: row['responsable'] || '',
@@ -2519,24 +2525,15 @@ function renderPrecios() {
 //  TAB: INSUMOS POR HA
 // ============================================================
 function updatePorhaFiltros() {
-  // Cultivo seleccionado → poblar antecesores desde OPTIONS (igual que Comparativo)
   const fCultivo = document.getElementById('porha-cultivo').value;
   const selAnt = document.getElementById('porha-antecesor');
   const selSit = document.getElementById('porha-situacion');
 
-  // Antecesores: de OPTIONS para el cultivo seleccionado
-  // Si no hay cultivo seleccionado, unión de antecesores de todos los cultivos presentes en superficies
-  let ants = [];
-  if (fCultivo && OPTIONS[fCultivo]) {
-    ants = [...OPTIONS[fCultivo].antecesores].sort();
-  } else {
-    const cultivos = [...new Set(superficies.map(s => s.cultivo))];
-    const antSet = new Set();
-    for (const c of cultivos) {
-      if (OPTIONS[c]) OPTIONS[c].antecesores.forEach(a => antSet.add(a));
-    }
-    ants = [...antSet].sort();
-  }
+  // Antecesores desde superficies reales, filtradas por cultivo seleccionado
+  const cultSups = fCultivo
+    ? superficies.filter(s => s.cultivo === fCultivo)
+    : superficies;
+  const ants = [...new Set(cultSups.map(s => s.antecesor))].filter(Boolean).sort();
 
   selAnt.innerHTML = '<option value=""></option>';
   for (const a of ants) selAnt.innerHTML += `<option value="${a}">${U(a)}</option>`;
@@ -2548,23 +2545,14 @@ function updatePorhaFiltros() {
 }
 
 function updatePorhaAntecesorFiltro() {
-  // Antecesor seleccionado → poblar situaciones desde OPTIONS (igual que Comparativo)
-  const fCultivo  = document.getElementById('porha-cultivo').value;
-  const fAnt      = document.getElementById('porha-antecesor').value;
-  const selSit    = document.getElementById('porha-situacion');
+  const fCultivo = document.getElementById('porha-cultivo').value;
+  const fAnt     = document.getElementById('porha-antecesor').value;
+  const selSit   = document.getElementById('porha-situacion');
 
-  // Situaciones: de OPTIONS para el cultivo seleccionado
-  let sits = [];
-  if (fCultivo && OPTIONS[fCultivo]) {
-    sits = getSituacionesDisplay(fCultivo);
-  } else {
-    const cultivos = [...new Set(superficies.map(s => s.cultivo))];
-    const sitSet = new Set();
-    for (const c of cultivos) {
-      if (OPTIONS[c]) getSituacionesDisplay(c).forEach(s => sitSet.add(s));
-    }
-    sits = [...sitSet].sort();
-  }
+  // Situaciones desde superficies reales, filtradas por cultivo y antecesor
+  let cultSups = fCultivo ? superficies.filter(s => s.cultivo === fCultivo) : superficies;
+  if (fAnt) cultSups = cultSups.filter(s => s.antecesor.toLowerCase() === fAnt.toLowerCase());
+  const sits = [...new Set(cultSups.map(s => s.situacion))].filter(Boolean).sort();
 
   selSit.innerHTML = '<option value=""></option>';
   for (const s of sits) selSit.innerHTML += `<option value="${s}">${U(s)}</option>`;
