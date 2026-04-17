@@ -3410,6 +3410,9 @@ function renderMargen() {
     // Si hay superficies filtradas, calcular por superficie real
     if (sups.length > 0) {
       for (const sup of sups) {
+        // Ingreso: misma logica que costo. Como los registros de grano suelen tener
+        // Antecesor="todos"/Situacion="todas", deduplicamos por producto+dosis+unidad
+        // para no multiplicar el rendimiento cuando multiples registros matchean la misma sup.
         const ingRecs = RECORDS.filter(r =>
           activs.includes(normActiv(r.Activ)) &&
           r['E/I'] === 'Ingreso' &&
@@ -3417,7 +3420,11 @@ function renderMargen() {
           antMatches(r.Antecesor, sup.antecesor) &&
           sitMatches(r.Situacion, sup.situacion)
         );
+        const ingVistos = new Set();
         for (const r of ingRecs) {
+          const key = r['Produc/labor'] + '|' + r.Dosis + '|' + r.Unidad;
+          if (ingVistos.has(key)) continue;
+          ingVistos.add(key);
           const p = getPrecio(r['Produc/labor'], r.Unidad);
           if (p !== null) ingresoTotal += p * r.Dosis * sup.ha;
           else nSinPrecioIngreso++;
