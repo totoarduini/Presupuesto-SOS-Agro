@@ -692,6 +692,11 @@ async function loadFromGSheets() {
     result.forEach(r => RECORDS.push(r));
     const newOpts = rebuildOptions(result);
     Object.assign(OPTIONS, newOpts);
+
+    // Si el filtro admin está en modo 1ha/combo, regenerar superficies con OPTIONS actualizado
+    if (isAdmin && adminEmpresaFilter === '__ADMIN_1HA__') {
+      applySuperficiesRows(_generateAdminRows());
+    }
     
     // Re-render current tab
     const activeTab = document.querySelector('.tab-content.active')?.id?.replace('tab-','');
@@ -859,22 +864,47 @@ function _updateAdminEmpresaSelector() {
   const sel = document.getElementById('admin-empresa-sel');
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = '<option value="">Todas</option>';
+  sel.innerHTML = '<option value="">Todas</option><option value="__ADMIN_1HA__">🔬 ADMIN (1 ha/combo)</option>';
   const empresas = [...new Set(gsSupRows.map(r => r.empresa))].sort();
   for (const e of empresas) sel.innerHTML += `<option value="${e}"${e===cur?' selected':''}>${e}</option>`;
+  // Restaurar selección previa si sigue siendo válida
+  if (cur && (cur === '__ADMIN_1HA__' || empresas.includes(cur))) sel.value = cur;
+}
+
+// Genera 1 ha por cada combinación cultivo/antecesor/situación presente en OPTIONS
+function _generateAdminRows() {
+  const rows = [];
+  for (const [cultivo, opts] of Object.entries(OPTIONS)) {
+    const ants = opts.antecesores?.length ? opts.antecesores : ['todos'];
+    const sits = opts.situaciones?.length ? opts.situaciones : ['todas'];
+    for (const ant of ants) {
+      for (const sit of sits) {
+        rows.push({ empresa: 'ADMIN', responsable: '', cultivo, antecesor: ant, situacion: sit, ha: 1 });
+      }
+    }
+  }
+  return rows;
 }
 
 function setAdminEmpresaFilter(empresa) {
   adminEmpresaFilter = empresa;
-  const filtered = empresa ? gsSupRows.filter(r => r.empresa === empresa) : gsSupRows;
+  let filtered;
+  let statusText;
+
+  if (empresa === '__ADMIN_1HA__') {
+    filtered = _generateAdminRows();
+    statusText = `🔬 ${filtered.length} combo(s) · ADMIN 1 ha/combo`;
+  } else if (empresa) {
+    filtered = gsSupRows.filter(r => r.empresa === empresa);
+    statusText = `📊 ${filtered.length} combinación(es) · Empresa: ${empresa}`;
+  } else {
+    filtered = gsSupRows;
+    statusText = `📊 ${filtered.length} combinación(es) · Todas las empresas`;
+  }
+
   applySuperficiesRows(filtered);
   const el = document.getElementById('sup-sync-status');
-  if (el) {
-    el.textContent = empresa
-      ? `📊 ${filtered.length} combinación(es) · Empresa: ${empresa}`
-      : `📊 ${filtered.length} combinación(es) · Todas las empresas`;
-    el.style.color = '#2d6a2d';
-  }
+  if (el) { el.textContent = statusText; el.style.color = '#2d6a2d'; }
   // Re-render tab activo si no es superficies
   const activeTab = document.querySelector('.tab-content.active')?.id?.replace('tab-','');
   if (activeTab && activeTab !== 'superficies') showTabByName(activeTab);
