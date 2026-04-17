@@ -3423,7 +3423,8 @@ function renderMargen() {
           ingVistos.add(key);
           const p = getPrecio(r['Produc/labor'], r.Unidad);
           if (p !== null) {
-            ingresoNumerador += p * r.Dosis * sup.ha;
+            // Rendimiento en kg, precio en u$s/tn → convertir: kg / 1000
+            ingresoNumerador += p * (r.Dosis / 1000) * sup.ha;
             haConGrano += sup.ha;
           } else nSinPrecioIngreso++;
         }
@@ -3449,7 +3450,7 @@ function renderMargen() {
       );
       for (const r of ingRecs) {
         const p = getPrecio(r['Produc/labor'], r.Unidad);
-        if (p !== null) ingresoTotal += p * r.Dosis;
+        if (p !== null) ingresoTotal += p * (r.Dosis / 1000);  // kg → tn
         else nSinPrecioIngreso++;
       }
       const costoRecs = RECORDS.filter(r =>
