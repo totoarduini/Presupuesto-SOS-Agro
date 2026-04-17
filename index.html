@@ -877,9 +877,12 @@ function _generateAdminRows() {
   const rows = [];
   for (const [cultivo, opts] of Object.entries(OPTIONS)) {
     const ants = opts.antecesores?.length ? opts.antecesores : ['todos'];
-    const sits = opts.situaciones?.length ? opts.situaciones : ['todas'];
+    // Usar getSituacionesDisplay para que las situaciones coincidan exactamente
+    // con las opciones del dropdown (incluye el 'Base' sintético cuando no hay ninguna)
+    const sits = getSituacionesDisplay(cultivo);
+    const sitsToUse = sits.length ? sits : ['todas'];
     for (const ant of ants) {
-      for (const sit of sits) {
+      for (const sit of sitsToUse) {
         rows.push({ empresa: 'ADMIN', responsable: '', cultivo, antecesor: ant, situacion: sit, ha: 1 });
       }
     }
@@ -3050,28 +3053,33 @@ function setCiPivot(v) {
 }
 
 function initCiDefaults() {
-  // Called once when tab opens - sets default state if not yet initialised
-  // Default: no cultivo filter (all cultivos shown), Soja pre-selected as antecesor
   updateCiFiltros();
-  // Pre-check "Soja" in the global antecesor ms (only when no cultivo is selected)
   setTimeout(() => {
-    const sel = document.getElementById('ci-cultivo').value;
-    if (!sel) {
-      // Pre-check Soja en antecesor y Base en situación
-      let changed = false;
-      document.querySelectorAll('#ms-ci-ant input[type=checkbox]').forEach(cb => {
-        if (cb.value.toLowerCase() === 'soja') { cb.checked = true; changed = true; }
-      });
-      if (changed) refreshMsBtn('ms-ci-ant', 'ms-ci-ant-btn');
-
-      let changedSit = false;
-      document.querySelectorAll('#ms-ci-sit input[type=checkbox]').forEach(cb => {
-        if (cb.value.toLowerCase() === 'base') { cb.checked = true; changedSit = true; }
-      });
-      if (changedSit) refreshMsBtn('ms-ci-sit', 'ms-ci-sit-btn');
-
-      if (changed || changedSit) renderCosto();
+    // Antecesor: marcar "Todos" (master checkbox → selecciona todos)
+    const antAll = document.getElementById('ms-ci-ant-all');
+    if (antAll && !antAll.checked) {
+      antAll.checked = true;
+      antAll.dispatchEvent(new Event('change'));
     }
+
+    // Situación: marcar "Todas"
+    const sitAll = document.getElementById('ms-ci-sit-all');
+    if (sitAll && !sitAll.checked) {
+      sitAll.checked = true;
+      sitAll.dispatchEvent(new Event('change'));
+    }
+
+    // Tipo: marcar todo EXCEPTO Cosecha
+    let tipoChanged = false;
+    document.querySelectorAll('#ms-ci-tipo input[type=checkbox]').forEach(cb => {
+      if (cb.value.startsWith('__')) return; // saltar master
+      const shouldCheck = cb.value.toLowerCase() !== 'cosecha';
+      if (cb.checked !== shouldCheck) { cb.checked = shouldCheck; tipoChanged = true; }
+    });
+    // Asegurar que el master "todos" quede desmarcado (no todos están activos)
+    const tipoAll = document.getElementById('ms-ci-tipo-all');
+    if (tipoAll) tipoAll.checked = false;
+    if (tipoChanged) { refreshMsBtn('ms-ci-tipo', 'ms-ci-tipo-btn'); renderCosto(); }
   }, 50);
 }
 function updateCiFiltros() {
