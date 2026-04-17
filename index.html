@@ -846,6 +846,7 @@ async function refreshSuperficies() {
       ? (adminEmpresaFilter ? gsSupRows.filter(r => r.empresa === adminEmpresaFilter) : gsSupRows)
       : gsSupRows.filter(r => r.empresa.toLowerCase() === currentEmpresa.toLowerCase());
     applySuperficiesRows(filtered);
+    Object.keys(mbSeleccion).forEach(k => delete mbSeleccion[k]);
     if (el) {
       el.textContent = `✅ ${superficies.length} combinación(es) · ${isAdmin ? 'ADMIN' : currentEmpresa} · ${new Date().toLocaleTimeString('es-AR')}`;
       el.style.color = '#2d6a2d';
@@ -888,6 +889,8 @@ function _generateAdminRows() {
 
 function setAdminEmpresaFilter(empresa) {
   adminEmpresaFilter = empresa;
+  // Resetear selecciones de Margen Bruto para que no queden filtros viejos
+  Object.keys(mbSeleccion).forEach(k => delete mbSeleccion[k]);
   let filtered;
   let statusText;
 
