@@ -3364,16 +3364,11 @@ function renderCosto() {
 const mbSeleccion = {};
 
 function initMbFiltros() {
-  // Inicializar selecciones con el primer valor disponible por cultivo
+  // Inicializar selecciones en "Todos"/"Todas" ('' = sin filtro)
   const CULTIVOS = ['Trigo','Cebada','Soja','Maiz','Girasol','Maiz tardio','Maiz 2da','Soja 2da'];
   for (const cultivo of CULTIVOS) {
     if (!mbSeleccion[cultivo]) {
-      const ants = OPTIONS[cultivo]?.antecesores || [];
-      const sits = getSituacionesDisplay(cultivo);
-      mbSeleccion[cultivo] = {
-        ant: ants[0] || '',
-        sit: sits[0] || ''
-      };
+      mbSeleccion[cultivo] = { ant: '', sit: '' };
     }
   }
   renderMargen();
@@ -3396,23 +3391,24 @@ function renderMargen() {
     const selAnt = sel.ant || '';
     const selSit = sel.sit || '';
 
-    // Superficies del cultivo filtradas por ant/sit seleccionados
+    // Superficies del cultivo filtradas por ant/sit seleccionados ('' = sin filtro = Todos/Todas)
     let sups = superficies.filter(s => s.cultivo === cultivo);
-    if (selAnt) sups = sups.filter(s => antMatches(selAnt, s.antecesor) || antMatches(s.antecesor, selAnt) || s.antecesor === selAnt);
-    if (selSit) sups = sups.filter(s => sitMatches(selSit, s.situacion) || sitMatches(s.situacion, selSit) || s.situacion === selSit);
+    if (selAnt) sups = sups.filter(s => s.antecesor.toLowerCase() === selAnt.toLowerCase());
+    if (selSit) sups = sups.filter(s => s.situacion.toLowerCase() === selSit.toLowerCase());
 
     const totalHa = sups.reduce((sum, s) => sum + s.ha, 0);
-    if (totalHa === 0 && sups.length === 0) return null;
+    if (totalHa === 0 && sups.length === 0 && superficies.some(s => s.cultivo === cultivo)) return null;
 
     let ingresoTotal = 0, costoTotal = 0;
     let nSinPrecioIngreso = 0, nSinPrecioCosto = 0;
 
-    // Si hay superficies filtradas, calcular por superficie real
+    // Si hay superficies filtradas, calcular ingreso ponderado por ha de Tipo Grano
     if (sups.length > 0) {
+      // Ingreso: rendimiento ponderado = sum(rendimiento_i * precio_i * ha_i) / totalHa
+      // Para cada sup, buscar el record de Grano que le corresponde
+      let ingresoNumerador = 0; // sum(rend * precio * ha_sup)
+      let haConGrano = 0;       // ha que tienen grano matcheado (para detectar faltantes)
       for (const sup of sups) {
-        // Ingreso: misma logica que costo. Como los registros de grano suelen tener
-        // Antecesor="todos"/Situacion="todas", deduplicamos por producto+dosis+unidad
-        // para no multiplicar el rendimiento cuando multiples registros matchean la misma sup.
         const ingRecs = RECORDS.filter(r =>
           activs.includes(normActiv(r.Activ)) &&
           r['E/I'] === 'Ingreso' &&
@@ -3426,8 +3422,10 @@ function renderMargen() {
           if (ingVistos.has(key)) continue;
           ingVistos.add(key);
           const p = getPrecio(r['Produc/labor'], r.Unidad);
-          if (p !== null) ingresoTotal += p * r.Dosis * sup.ha;
-          else nSinPrecioIngreso++;
+          if (p !== null) {
+            ingresoNumerador += p * r.Dosis * sup.ha;
+            haConGrano += sup.ha;
+          } else nSinPrecioIngreso++;
         }
         const costoRecs = filterRecords(sup.cultivo, sup.antecesor, sup.situacion);
         for (const r of costoRecs) {
@@ -3436,6 +3434,8 @@ function renderMargen() {
           else nSinPrecioCosto++;
         }
       }
+      // Ingreso promedio ponderado: dividir por totalHa (superficie sembrada filtrada)
+      ingresoTotal = totalHa > 0 ? ingresoNumerador / totalHa : 0;
     } else {
       // Sin superficies cargadas: calcular /ha directo con ant/sit del selector
       const antFilter = selAnt || '__todos__';
@@ -3467,7 +3467,8 @@ function renderMargen() {
     }
 
     const ha = totalHa > 0 ? totalHa : 1;
-    const ingresoHa = ingresoTotal / ha;
+    // ingresoTotal: ya es el valor ponderado /ha cuando hay sups; es el valor directo /ha cuando no hay sups
+    const ingresoHa = ingresoTotal; // ya dividido por totalHa en el branch correspondiente
     const costoHa = costoTotal / ha;
     const margenHa = ingresoHa - costoHa;
 
@@ -3504,21 +3505,32 @@ function renderMargen() {
   let hayGranoSinPrecio = false;
 
   for (const cultivo of cultivosConDatos) {
-    const ants = OPTIONS[cultivo]?.antecesores || [];
-    const sits = getSituacionesDisplay(cultivo);
-    const sel = mbSeleccion[cultivo] || { ant: ants[0] || '', sit: sits[0] || '' };
+    const sel = mbSeleccion[cultivo] || { ant: '', sit: '' };
 
-    const selOpts = (arr, val, tipo) =>
-      arr.map(v => `<option value="${v}"${v===val?' selected':''}>${U(v)}</option>`).join('');
+    // Para ADMIN: mostrar todos los OPTIONS; para otros: solo los que tienen superficie cargada
+    let availableAnts, availableSits;
+    if (isAdmin) {
+      availableAnts = OPTIONS[cultivo]?.antecesores || [];
+      availableSits = getSituacionesDisplay(cultivo);
+    } else {
+      const cultSups = superficies.filter(s => s.cultivo === cultivo);
+      availableAnts = [...new Set(cultSups.map(s => s.antecesor))].sort();
+      availableSits = [...new Set(cultSups.map(s => s.situacion))].sort();
+    }
+
+    const selOpts = (arr, val, labelTodos) => {
+      const todosOpt = `<option value=""${val===''?' selected':''}>${labelTodos}</option>`;
+      return todosOpt + arr.map(v => `<option value="${v}"${v===val?' selected':''}>${U(v)}</option>`).join('');
+    };
 
     const antSel = `<select style="width:100%;padding:3px 5px;border:1px solid var(--verde-borde);border-radius:4px;font-size:12px;background:white"
       onchange="mbOnChange('${cultivo.replace(/'/g,"\\'")}','ant',this.value)">
-      ${selOpts(ants, sel.ant, 'ant')}
+      ${selOpts(availableAnts, sel.ant, '— Todos —')}
     </select>`;
 
     const sitSel = `<select style="width:100%;padding:3px 5px;border:1px solid var(--verde-borde);border-radius:4px;font-size:12px;background:white"
       onchange="mbOnChange('${cultivo.replace(/'/g,"\\'")}','sit',this.value)">
-      ${selOpts(sits, sel.sit, 'sit')}
+      ${selOpts(availableSits, sel.sit, '— Todas —')}
     </select>`;
 
     const r = calcCultivoMargen(cultivo);
